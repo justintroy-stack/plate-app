@@ -216,14 +216,14 @@ function need(F,st){const used=consumedSet(targetOrder());
    home a meal is a day, and nothing here is a date. */
 const tripQty=v=>String(Math.round(v*100)/100);
 function drawOver(n,F){F=F||forecast();const tot={};F.days.slice(0,Math.max(0,Math.min(n,H))).forEach(draw=>{for(const k in draw)tot[k]=Math.round(((tot[k]||0)+draw[k])*100)/100;});return tot;}
-function tripNeed(sk,n,F){
-  const used=consumedSet(targetOrder()), tot=drawOver(n,F);
-  return IORDER.filter(k=>I[k].store===sk&&used.has(k)&&(tot[k]||0)>0).map(k=>{
-    const have=Math.round((S.inv[k]||0)*100)/100, need=tot[k], short=Math.max(0,Math.round((need-have)*100)/100), pack=I[k].pack||0;
-    const packs=short>0&&pack>0?Math.ceil(short/pack-1e-9):0;
-    return {k,need,have,short,packs,units:pack>0?Math.round(packs*pack*100)/100:short};
-  }).filter(r=>r.short>0);
-}
+/* one arithmetic for both lists: what n meals draw of k, less what is on hand, in packs */
+function buyRow(k,n,tot){const have=Math.round((S.inv[k]||0)*100)/100, need=Math.round((tot[k]||0)*100)/100, short=Math.max(0,Math.round((need-have)*100)/100), pack=I[k].pack||0;
+  const packs=short>0&&pack>0?Math.ceil(short/pack-1e-9):0;return {k,need,have,short,packs,units:pack>0?Math.round(packs*pack*100)/100:short};}
+function tripNeed(sk,n,F){const used=consumedSet(targetOrder()), tot=drawOver(n,F);
+  return IORDER.filter(k=>I[k].store===sk&&used.has(k)&&(tot[k]||0)>0).map(k=>buyRow(k,n,tot)).filter(r=>r.short>0);}
+/* the store's own list with its quantities: it holds what runs out on or before the threshold
+   meal, so its horizon is one meal past the threshold and every row on it is short */
+function listRows(sk,F){F=F||forecast();const st=STORES[sk], n=(st.threshold||0)+1, tot=drawOver(n,F);return need(F,st).map(k=>buyRow(k,n,tot));}
 const countdownStore=()=>SORDER.map(k=>STORES[k]).find(s=>s.countdown)||STORES[SORDER[0]];
 
 /* what the log is about to change, kept so it can be put back */
@@ -579,13 +579,16 @@ window.act={
    if(!m.length){say('Flavour pantry is complete.');return;}
    navigator.clipboard?navigator.clipboard.writeText(m.join('\n')).then(()=>say(m.length+' items copied.'),()=>say('Copy blocked')):say('Copy blocked');},
  bump(k,d){ENTER='bump';FLIPSRC='bump';setInv(k,(S.inv[k]||0)+d);persist();render();},
- restock(sk){FLIPSRC='stock';const st=STORES[sk],F=forecast();need(F,st).forEach(k=>S.inv[k]=I[k].pack);persist();render();say(st.name+' run logged.');},
- copy(sk){const st=STORES[sk],F=forecast(),items=need(F,st);
-   if(!items.length){say('Nothing needed from '+st.name+'.');return;}
+ /* the store's list, bought: what was bought is added to what is on hand, never reset to a pack */
+ restock(sk){FLIPSRC='stock';const st=STORES[sk],rows=listRows(sk);rows.forEach(r=>setInv(r.k,(S.inv[r.k]||0)+r.units));persist();render();
+   say(st.name+' run logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
+ copy(sk){const st=STORES[sk],rows=listRows(sk);
+   if(!rows.length){say('Nothing needed from '+st.name+'.');return;}
+   const line=(r,full)=>I[r.k].name+' — '+tripQty(r.units)+' '+I[r.k].unit+' — '+(full?I[r.k].buy:I[r.k].buy.split('.')[0]);
    let t='';
-   if(st.countdown){const g={};items.forEach(k=>{(g[I[k].zone]=g[I[k].zone]||[]).push(I[k].name+' — '+I[k].buy);});
+   if(st.countdown){const g={};rows.forEach(r=>{(g[I[r.k].zone]=g[I[r.k].zone]||[]).push(line(r,true));});
      ZONES.forEach(z=>{if(g[z])t+=z.toUpperCase()+'\n'+g[z].join('\n')+'\n\n';});}
-   else t=items.map(k=>I[k].name+' — '+I[k].buy.split('.')[0]).join('\n');
+   else t=rows.map(r=>line(r,false)).join('\n');
    navigator.clipboard?navigator.clipboard.writeText(t.trim()).then(()=>say('Copied for the '+st.name+' list.'),()=>say('Copy blocked')):say('Copy blocked');},
  /* a trip you call yourself: cover the next N meals from tonight; Bought it adds exactly that */
  tripOpen(sk){TRIP[sk]=(STORES[sk]&&STORES[sk].threshold)||14;render();},
@@ -1506,11 +1509,12 @@ function viewKitchen(F){
       main+='<p class="t-body" style="margin-top:var(--s2)">Nothing needed.'+(run.k?' '+esc(I[run.k].name)+' is next to run short, in '+nMeals(run.d)+'.':'')+'</p>'+
         '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn" type="button" data-fk="trip:'+esc(sk)+'" onclick="act.tripOpen(\''+esc(sk)+'\')">Plan a trip</button></div>';
     } else {
-      const tgt=targetOrder(), cur=S.order;
+      const tgt=targetOrder(), cur=S.order, by={};
+      listRows(sk,F).forEach(r=>by[r.k]=r);
       main+='<div class="rows">';
-      items.forEach(k=>{const a=perCycle(cur,k), b=perCycle(tgt,k), d=L[k];
+      items.forEach(k=>{const a=perCycle(cur,k), b=perCycle(tgt,k), d=L[k], r=by[k];
         main+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
-          '<span class="row__meta">'+esc(I[k].buy)+'</span>'+
+          '<span class="row__meta">'+(r?tripQty(r.units)+' '+esc(I[k].unit)+' · ':'')+esc(I[k].buy)+'</span>'+
           (a!==b?'<span class="row__note">'+b+' '+esc(I[k].unit)+' per '+N+' meals once the change lands, was '+a+'.</span>':'')+'</span>'+
           (first?'':d<=0?'<span class="pill" data-family="ember"><i class="dot"></i>out</span>':'<span class="pill pill--ghost">'+nMeals(d)+'</span>')+'</div>';});
       main+='</div><div class="btnrow" style="margin-top:var(--s4)">'+
