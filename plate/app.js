@@ -1,5 +1,5 @@
 
-/* The Plate. No food data lives in this file: the server injects window.PLATE_CONFIG
+/* Plateside. No food data lives in this file: the server injects window.PLATE_CONFIG
    (config/meals.csv, kits, cold_slots, items, store_items, stores, flavor_pantry) plus the
    rotation plan the food targets ask for. Each item arrives already resolved to the one store
    the profile puts in play for it. State stays on the device; the shim mirrors it to the Mac.
@@ -38,9 +38,9 @@ const toast=say;
 let CFG=window.PLATE_CONFIG||null;
 try{if(CFG)localStorage.setItem('lt:plate:config',JSON.stringify(CFG));else CFG=JSON.parse(localStorage.getItem('lt:plate:config')||'null');}catch(e){}
 if(!CFG){
-  document.getElementById('app').innerHTML='<div class="stack"><section class="card a-hero" data-family="sprout"><span class="t-label">Plate</span>'+
+  document.getElementById('app').innerHTML='<div class="stack"><section class="card a-hero" data-family="sprout"><span class="t-label">Plateside</span>'+
     '<h1 class="t-display" style="margin-top:var(--s3)">Open this once on the Mac.</h1>'+
-    '<p class="t-body" style="margin-top:var(--s3);color:var(--ink-2)">The meals, the stock and the shopping come from Plate on the Mac. '+
+    '<p class="t-body" style="margin-top:var(--s3);color:var(--ink-2)">The meals, the stock and the shopping come from Plateside on the Mac. '+
     'After one visit while it is reachable, this page keeps working on its own.</p></section></div>';
   throw new Error('no config');
 }
@@ -56,6 +56,7 @@ const KITS=CFG.kits, SLOTS=CFG.cold, I=CFG.items, IORDER=CFG.item_order, STORES=
 const SCAT=CFG.store_catalog||SORDER, UNSUP=CFG.unsupplied||[];   /* every store, and what no store in play carries */
 const EQUIP=CFG.equipment||{}, BUDGET=CFG.hands_on_minutes, NOCOOK=CFG.uncookable||[];   /* the kitchen: its appliances, the hands-on budget, what it cannot cook */
 const REG=CFG.regimen||null, REGS=CFG.regimens||[], NOREG=CFG.excluded||[], NOCOLD=CFG.cold_excluded||[];   /* how you eat: the plan in play, every plan on file, what it leaves out */
+const AVOID=CFG.avoid||[];              /* what the person will not eat, on top of the plan: food-group tags */
 /* When you eat: the occasions, and the one that carries the recipe. One cursor tick is one
    eating cycle, every occasion once, so the rotation still advances by one meal per log. */
 const OCC=CFG.occasions||[{id:'dinner',name:'Dinner',rotation:true}], ROT=(OCC.find(o=>o.rotation)||OCC[0]).id;
@@ -88,7 +89,7 @@ const unitOf=(k,v)=>{const u=I[k].unit;if(!u||u==='each')return '';
   return (v===1&&u.length>1&&u.slice(-1)==='s'?u.slice(0,-1):u)+' ';};
 const qty=u=>Object.entries(u||{}).filter(([k,v])=>v!=null&&I[k]).map(([k,v])=>
   fmt(v)+' '+unitOf(k,v)+I[k].name.toLowerCase()).join(', ');
-const notOn=x=>'Not on the '+planName()+' plan: has '+list(x.excluded||[])+'.';
+const notOn=x=>{const av=(x.excluded||[]).filter(t=>AVOID.includes(t));return av.length?'Has '+list(av.map(t=>TAGWORD[t]||t))+', which you leave out.':'Not on the '+planName()+' plan: has '+list(x.excluded||[])+'.';};
 const PLAN=CFG.plan||null, SWAPS=PLAN?PLAN.swaps:[], SWAP={};SWAPS.forEach(s=>SWAP[s.key]=s);
 const FULL={},EMPTY={};IORDER.forEach(k=>{FULL[k]=I[k].pack;EMPTY[k]=0;});
 
@@ -227,10 +228,21 @@ function report(kind,hot,coldIds){
 /* A one-time note explains a mechanism at the one moment it is legible. Each fires once,
    ever, and rides the same save as the log that caused it. */
 function note(k,arg){if(NOTE!==null||S.seen.includes(k))return;S.seen.push(k);NOTE=k;NOTEARG=arg||'';}
+
+/* ---- "Also had": something from stock eaten outside the plan. Only what the plan holds can be
+   had, because only that has units, calories and protein: the live options of every slot in
+   play and a second helping of tonight's plate. Stock leaves exactly, the day counts it, and
+   the cursor never moves. A thing the plan never held has no stock here and stays out. */
+function extraOptions(){
+  const m=activeMeal(), out=[{key:'meal',label:'Another helping of '+m.name,kcal:m.kcal,protein_g:m.protein_g,uses:m.uses,slot:''}];
+  SLOTS.forEach(sl=>(liveOpts(sl)||[]).forEach((o,i)=>out.push({key:sl.id+'/'+i,label:o.label,kcal:o.kcal,protein_g:o.protein_g,uses:o.uses,slot:sl.name})));
+  return out;
+}
 /* ENGINE-CORE-END */
+let EXTRA=false;                        /* the Also had picker is open */
 
 window.act={
- tab(t){tab=t;partial=false;OPEN=null;TRADED=null;render();if(t==='markers'&&MK===null)loadMarkers();},
+ tab(t){tab=t;partial=false;EXTRA=false;OPEN=null;TRADED=null;render();if(t==='markers'&&MK===null)loadMarkers();},
  theme(){if(window.plateTheme)window.plateTheme();render();},
  begin(s){S.inv={...EMPTY};if(s)S.inv=stockedFor();S.init=true;S.pending={};S.applied=[];S.gate0={};tab=s?'tonight':'kitchen';adoptPlan();persist();render();
    if(!s)say('Empty. Your first run is ready on List.');},
@@ -378,9 +390,8 @@ window.act={
     state, so the stock question comes next and this screen never comes back on its own. */
  async saveSetup(){const g=id=>document.getElementById(id);
    const on=(prefix,keys)=>keys.filter(k=>{const el=g(prefix+k);return el&&el.checked;});
-   const diet={regimen:g('fr-regimen').value,portions:g('fr-people').value,
-     equipment:on('fr-eq-',CFG.equipment_catalog).join('|'),hands_on_minutes:g('fr-time').value,
-     occasions:on('fr-occ-',(CFG.occasion_catalog||[]).map(o=>o.id)).join('|')};
+   /* the answers the preview reads are the answers the save writes, plus the kitchen */
+   const diet=Object.assign(setupAnswers('fr-'),{equipment:on('fr-eq-',CFG.equipment_catalog).join('|'),hands_on_minutes:g('fr-time').value});
    const stores=on('fr-store-',SCAT).join('|');
    if(!diet.equipment){FRMSG='Tick at least one thing to cook on.';render();return;}
    if(!stores){FRMSG='Tick at least one store.';render();return;}
@@ -451,8 +462,9 @@ window.act={
    }catch(e){OMSG=e.message;render();}},
  /* the plan is resolved on the Mac and rides inside the page, so a saved choice fetches the
     page again, as the store picker does */
- async saveRegimen(){const v=RSEL==null?(REG?REG.id:''):RSEL;
+ async saveRegimen(){const v=RSEL==null?(REG?REG.id:''):RSEL, av=ticked('rg-avoid-',Object.keys(TAGWORD)).join('|');
    try{await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'regimen',value:v})});
+     if(av!==AVOID.join('|'))await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'avoid',value:av})});
      returnTo({at:'regimen'});say('Saved. Rebuilding the rotation.');setTimeout(()=>location.reload(),350);}
    catch(e){RMSG=e.message;render();}},
  sed(k,v){SED[k]=v;},
@@ -496,7 +508,17 @@ window.act={
    deduct(draw);S.cursor++;S.checked=[];persist();render();
    const lead=wasB?'Plan B logged. The freezer stayed sealed.':'Logged. Stock updated.';
    TRADED=null;say(lead,logLine(lead));fxSettle('Meal '+S.cursor+' logged',mealAt(0).name+' is next');},
- openPartial(){partial=true;pOven=false;render();},
+ openPartial(){partial=true;pOven=false;EXTRA=false;render();},
+ openExtra(){EXTRA=true;partial=false;render();},
+ closeExtra(){EXTRA=false;render();},
+ /* something from stock outside the plan: its own row in the log on no cursor, and the one undo
+    until the next log. The stamp is made here so the undo can name the row it takes out. */
+ extra(key){const o=extraOptions().find(x=>x.key===key);if(!o)return;
+   const at=new Date().toISOString();
+   S.last={inv:Object.assign({},S.inv),cursor:S.cursor,checked:S.checked.slice(),order:S.order.slice(),pending:Object.assign({},S.pending),
+     gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',at:at};
+   if(window.plateEvent)window.plateEvent({cursor:S.cursor,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, beside meal '+(S.cursor+1),at:at});
+   deduct(o.uses);EXTRA=false;persist();render();say('Also had '+o.label+'. Stock updated.');},
  cancelPartial(){partial=false;render();},
  toggleOven(){pOven=!pOven;render();},
  logPartial(){FLIPSRC='log';ENTER='log';const draw=previewDraw();
@@ -512,6 +534,12 @@ window.act={
     wins the sync against the other device's copy. The server removes the log row, because
     the log is deduplicated by cursor and a re-log tonight would otherwise be dropped. */
  undoLog(){let L=S.last;
+   if(L&&L.kind==='extra'){
+     /* an extra put back: the stock it took, and its row on the Mac; the cursor never moved */
+     S.inv=Object.assign({},L.inv);S.pending=Object.assign({},L.pending);S.gate0=Object.assign({},L.gate0);S.applied=L.applied.slice();S.order=L.order.slice();
+     S.last=null;
+     if(window.plateEvent)window.plateEvent({cursor:L.cursor,meal_id:'extra',meal:L.meal,kind:'undo_extra',note:'undone by the user',at:L.at});
+     persist();render();say('Undone. '+L.meal+' is back in stock.');return;}
    if(!L){
      /* No snapshot: the log was made on the previous page, or this is a second undo. Rebuild
         it from the slot: the meal that sat at the last cursor and the cold block beside it,
@@ -641,7 +669,7 @@ function reportCard(){
 
 /* ---- one-time notes: a mechanism explained at the moment it is legible --- */
 const NOTES={
-  first_log:['Your first meal is logged','Time in Plate is meals, not days. The cursor moved one place, and nothing here runs on a clock.'],
+  first_log:['Your first meal is logged','Time in Plateside is meals, not days. The cursor moved one place, and nothing here runs on a clock.'],
   first_partial:['Only what you ticked left your stock','A partial log is as honest a record as a full one. The forecast depends on it, so nothing about it is marked down.'],
   first_planb:['Plan B does not cost you a slot','The rotation did not advance past the meal you skipped. It is still next.'],
   gate_zero:['The stock that was holding a change back is gone','The slot flips at your next log, and the shopping list has already stopped buying for the old one.']
@@ -1112,7 +1140,14 @@ function viewTonight(F){
   top+=noteCard();
   top+=reportCard();
   if(CFG.plate_proposal)top+=plateCard(CFG.plate_proposal);
-  if(S.cursor>0){
+  const X=(S.last&&S.last.kind==='extra'&&S.last.cursor===S.cursor)?S.last:null;
+  if(X){
+    /* the last log was something outside the plan: the one undo until the next log */
+    top+='<section class="card" style="padding:0 var(--s5) var(--s2)"><div class="rows"><div class="row">'+
+      '<span class="row__body"><span class="row__title">Also had: '+esc(X.meal)+'</span>'+
+      '<span class="row__meta">outside the plan · the rotation did not move</span></span>'+
+      '<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button></div></div></section>';
+  } else if(S.cursor>0){
     /* the last log, and the one way back. No clock on it: the meal log on the Mac keeps the
        real stamp, because that is the record, and this screen is the planner. With no snapshot
        (a log from before undo existed, or a second undo) the kind is a guess, so it says
@@ -1178,12 +1213,18 @@ function viewTonight(F){
       '<button class="btn btn-eat" data-fk="eat" onclick="act.cooked()">Ate it all</button>'+
       '<div class="btnrow"><button class="btn" data-fk="partial" onclick="act.openPartial()">Log what I ate</button>'+
       '<button class="btn" data-fk="trade" onclick="act.swap()">Trade with next</button></div>'+
+      '<button class="btn" data-fk="extra" onclick="act.openExtra()">Also had something from stock</button>'+
       (TRADED?'<div class="undoline arrive" data-family="frost"><span>Traded with '+esc(TRADED)+'. The cold block did not move, '+
         'because it rotates on its own index.</span>'+
         '<button class="btn btn--sm btn--ink" type="button" data-fk="untrade" onclick="act.unswap()">Undo</button></div>':'')+
       (PLANB&&!planB?'<button class="btn" data-fk="planb" onclick="act.planB(true)">Nothing thawed? '+esc(PLANB.name)+'</button>':'')+
       (planB?'<button class="btn" data-fk="planb" onclick="act.planB(false)">Back to the planned meal</button>':'')+
       '</div><p class="t-note" style="margin-top:var(--s3)">'+esc(nextGoal(F))+'</p></section>';
+    if(EXTRA)aside+='<section class="card" data-family="sprout"><span class="t-label">Also had</span>'+
+      '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move. A thing the plan never held has no stock here, so it stays out.</p><div class="rows">'+
+      extraOptions().map(o=>'<button class="row" type="button" data-fk="extra:'+esc(o.key)+'" onclick="act.extra(\''+esc(o.key)+'\')"><span class="row__body"><span class="row__title">'+esc(o.label)+'</span>'+
+        '<span class="row__meta">'+(o.slot?esc(o.slot)+' · ':'')+Number(o.kcal).toLocaleString()+' kcal · '+o.protein_g+' g protein</span></span>'+icon('arrow')+'</button>').join('')+
+      '</div><div class="btnrow" style="margin-top:var(--s3)"><button class="btn" data-fk="extraback" onclick="act.closeExtra()">Back</button></div></section>';
   } else {
     let pc=pOven?m.kcal:0, pp=pOven?m.protein_g:0;
     coldAt(0).forEach(c=>{if(S.checked.includes(c.id)){pc+=c.kcal;pp+=c.protein_g;}});
@@ -1215,6 +1256,15 @@ function viewTonight(F){
 const PROTFAM={red_meat:'ember',pork:'plum',poultry:'clay',fish:'frost',shellfish:'frost',plant:'sprout',egg:'sprout',dairy:'sprout',pantry:'sprout'};
 const PROTWORD={red_meat:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',plant:'plant',egg:'eggs',dairy:'dairy',pantry:'pantry'};
 const famOf=m=>PROTFAM[m.protein_class]||'sprout';
+/* The food-group note under the rotation: one group that lands three or more times on a night
+   whatever the cold block draws. The engine counts it in both twins; the page only says it. */
+const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy'};
+const NUMWORD=['no','one','two','three','four','five','six','seven','eight','nine'];
+function groupLine(g){
+  const word=TAGWORD[g.tag]||g.tag, parts=(g.slots||[]).map(s=>'the '+String(s).split(' — ')[0].toLowerCase());
+  if(g.items&&g.items.length)parts.push('the '+list(g.items.map(x=>String(x).toLowerCase()))+' on the plate');
+  return word.replace(/^\w/,c=>c.toUpperCase())+' lands '+(NUMWORD[g.times]||g.times)+' times '+(g.nights===g.of?'every night':'on '+g.nights+' of '+g.of+' nights')+': '+list(parts)+'. Nothing in your targets counts it; it is here so you can see it.';
+}
 const protWord=m=>PROTWORD[m.protein_class]||'';
 const ord=n=>n+(['th','st','nd','rd'][(n%100>10&&n%100<14)?0:(n%10<4?n%10:0)]);
 
@@ -1284,10 +1334,10 @@ function whyCard(F,opt){
     const pending=S.pending[sw.key]!=null&&S.pending[sw.key]>0, landed=S.applied&&S.applied.includes(sw.key), flip=F.flips[sw.key];
     const moves=Object.entries(sw.changes||{}).map(([c,v])=>tlabel(c).toLowerCase()+' nights '+v[0]+' to '+v[1]).join(', ');
     const rules=[...new Set((sw.why||[]).map(a=>a&&(a.display||a.rule)).filter(Boolean))];
-    const mk=sw.regimen?null:(sw.why||[]).map(a=>a&&a.marker).filter(Boolean)[0];
+    const leaving=(sw.excluded||[]).length>0, mk=leaving?null:(sw.why||[]).map(a=>a&&a.marker).filter(Boolean)[0];
     /* a swap the plan asked for says so in its own words and points at no marker */
     h+='<p class="t-body" style="margin-top:var(--s2);color:var(--ink)"><b>'+esc(sw.from_name)+' becomes '+esc(sw.to_name)+'.</b> '+
-      (sw.regimen?esc(notOn(sw)):'Your markers ask for '+esc(moves)+'.'+(rules.length?' The rule that fired: '+esc(rules.join(', '))+'.':''))+'</p>'+
+      (leaving?esc(notOn(sw)):'Your markers ask for '+esc(moves)+'.'+(rules.length?' The rule that fired: '+esc(rules.join(', '))+'.':''))+'</p>'+
       '<p class="t-note" style="margin-top:var(--s2)">'+(landed?'This one has landed.'
         :pending?'Nothing changes until the '+esc(sw.gate_name||'stock')+' you already own is eaten: '+(Math.round(S.pending[sw.key]*10)/10)+' '+esc(sw.gate_unit||'')+' left'+
           (flip!=null?', about '+flip+' meal'+(flip===1?'':'s')+' from now':'')+'.'
@@ -1296,12 +1346,12 @@ function whyCard(F,opt){
     if(mk)h+='<button class="btn btn--sm btn--quiet" type="button" data-fk="why:'+esc(mk)+'" style="margin-top:var(--s2);padding-left:0" '+
       'onclick="act.trend(\''+esc(mk)+'\')">See the marker '+icon('arrow')+'</button>';
   });
-  if(left.length)h+='<p class="t-note" style="margin-top:var(--s3)">'+left.length+' meal'+(left.length===1?' is':'s are')+' not on the '+esc(planName())+' plan and nothing in the catalog can replace '+(left.length===1?'it':'them')+': '+
+  if(left.length)h+='<p class="t-note" style="margin-top:var(--s3)">'+left.length+' meal'+(left.length===1?' is':'s are')+(REG?' not on the '+esc(planName())+' plan':' have what you leave out')+' and nothing in the catalog can replace '+(left.length===1?'it':'them')+': '+
     esc([...new Set(left.map(u=>u.name))].join(', '))+'. '+(left.length===1?'It stays':'They stay')+' until a meal that fits is added.</p>';
   return h+'</section>';
 }
 /* whose card this is on Tonight: the markers', the plan's, or both */
-function whyLabel(){const r=SWAPS.some(s=>s.regimen),m=SWAPS.some(s=>!s.regimen);return r&&m?'From how you eat and your markers':r?'From how you eat':'From your markers';}
+function whyLabel(){const r=SWAPS.some(s=>(s.excluded||[]).length),m=SWAPS.some(s=>!(s.excluded||[]).length);return r&&m?'From how you eat and your markers':r?'From how you eat':'From your markers';}
 
 function viewRotation(F){
   const cur=S.cursor+1, pos=S.cursor%N, cyc=Math.floor(S.cursor/N)+1, after=N-pos-1;
@@ -1319,7 +1369,8 @@ function viewRotation(F){
   h+='</div><p class="t-note" style="margin-top:var(--s4)">Open a meal to see it whole, or send it to tonight. '+
     'A protein comes back roughly every '+N+' meals and its flavour kit has moved on by then, so an identical meal '+
     'does not recur for months. The colour beside each meal is its protein, the thing the rotation counts: beef is orange, fish and shellfish blue, '+
-    'plant and bean plates green, poultry tan, pork plum. Meals, kits and stock are rows in config '+WHERE+'.</p></section>';
+    'plant and bean plates green, poultry tan, pork plum. Meals, kits and stock are rows in config '+WHERE+'.</p>'+
+    (CFG.group_note?'<p class="t-note" style="margin-top:var(--s2)">'+esc(groupLine(CFG.group_note))+'</p>':'')+'</section>';
   h+=whyCard(F,{cls:'a-aside'});
   return h+'</div>';
 }
@@ -1396,10 +1447,10 @@ function viewKitchen(F){
   const noreg=NOREG.filter(k=>MEALS[k]&&S.order.includes(k));
   const nocold=NOCOLD.filter(c=>{const sl=SLOTS.find(s=>s.id===c.slot);const o=sl&&sl.opts.find(x=>x.label===c.label);
     return !!o&&(o.excluded_items||[]).some(k=>(S.inv[k]||0)>0);});
-  if(REG&&(noreg.length||nocold.length))hero+='<section class="card card--tint" data-family="ember"><span class="t-label">Not on the '+esc(planName())+' plan</span>'+
+  if((REG||AVOID.length)&&(noreg.length||nocold.length))hero+='<section class="card card--tint" data-family="ember"><span class="t-label">'+(REG?'Not on the '+esc(planName())+' plan':'What you leave out')+'</span>'+
     '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(noreg.length?esc(noreg.map(k=>MEALS[k].name+' (has '+list(MEALS[k].excluded)+')').join(', '))+'. ':'')+
     (nocold.length?'From the cold block: '+esc(nocold.map(c=>c.label).join(', '))+'. ':'')+
-    'Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while this plan is chosen.</p>'+
+    'Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while it stays left out.</p>'+
     '<button class="btn btn--sm btn--quiet" type="button" data-fk="goplan" style="margin-top:var(--s2);padding-left:0" onclick="act.tab(\'markers\');act.mk(\'profile\')">Change how you eat '+icon('arrow')+'</button></section>';
 
   /* what to buy, one card per store */
@@ -1476,7 +1527,7 @@ let MKVIEW='overview', TREND=null, TRENDM='apob', BODY=null, ASSOC=null, DRAW=nu
 async function api(path,opts){
   const r=await fetch(path,opts);
   const j=await r.json();
-  if(j&&j.offline)throw new Error('Plate is not running on the Mac right now.');
+  if(j&&j.offline)throw new Error('Plateside is not running on the Mac right now.');
   if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
   return j;
 }
@@ -1950,6 +2001,9 @@ function viewRegimen(){
     '<div class="formgrid"><div class="field wide"><span>Plan</span><select data-fk="regsel" onchange="act.regimenPick(this.value)">'+
     '<option value=""'+(cur===''?' selected':'')+'>No plan: any meal in the catalog</option>'+
     REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===cur?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' of '+total+' meals fit</option>').join('')+'</select></div></div>';
+  h+='<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat, on top of the plan. A meal or a cold option that has it leaves the pool.</p>'+fieldAvoid('rg-avoid-',AVOID);
+  if(AVOID.length){const gone=[...new Set(S.order.filter(k=>MEALS[k]&&(MEALS[k].excluded||[]).some(t=>AVOID.includes(t))))];
+    h+='<p class="t-note" style="margin-top:var(--s2)">You leave out '+esc(list(AVOID.map(t=>TAGWORD[t]||t)))+'. '+(gone.length?gone.length+' of your '+N+' rotation nights change ('+esc(gone.map(k=>MEALS[k].name).join(', '))+'), each once the stock it was eating is gone.':'Nothing in your rotation has it.')+'</p>';}
   if(r){
     const out=new Set(r.leaves_out_meals||[]), gone=S.order.filter(k=>out.has(k)), names=[...new Set(gone.map(k=>MEALS[k]?MEALS[k].name:k))];
     const asks=[[r.red_meat_slots,'beef'],[r.fish_slots,'fish'],[r.beans_slots,'bean']].filter(x=>x[0]!=null).map(x=>x[0]+' '+x[1]);
@@ -1989,7 +2043,7 @@ function setupAnswers(prefix){
   if(prefix!=='fr-')return {};
   const g=id=>document.getElementById(id), on=(pre,keys)=>keys.filter(k=>{const el=g(pre+k);return el&&el.checked;});
   if(!g('fr-regimen'))return {};
-  return {regimen:g('fr-regimen').value,portions:g('fr-people').value,occasions:on('fr-occ-',(CFG.occasion_catalog||[]).map(o=>o.id)).join('|')};
+  return {regimen:g('fr-regimen').value,portions:g('fr-people').value,occasions:on('fr-occ-',(CFG.occasion_catalog||[]).map(o=>o.id)).join('|'),avoid:on('fr-avoid-',Object.keys(TAGWORD)).join('|')};
 }
 /* ---- YOUR KITCHEN, WHEN YOU EAT, and FIRST RUN ------------------------------------------- */
 let KMSG='',OMSG='',FRMSG='';          /* the cards' and the interview's save errors, if any */
@@ -2011,6 +2065,12 @@ function fieldOccasions(prefix,on){
   return '<div class="rows">'+(CFG.occasion_catalog||[]).map(o=>'<div class="row"><input class="tick" type="checkbox" id="'+prefix+esc(o.id)+'" data-fk="'+prefix+esc(o.id)+'"'+(on.includes(o.id)?' checked':'')+(o.rotation?' disabled':'')+'>'+
     '<label class="row__body" for="'+prefix+esc(o.id)+'"><span class="row__title">'+esc(o.name)+'</span>'+(o.rotation?'<span class="row__meta">carries the rotation</span>':'')+'</label></div>').join('')+'</div>';
 }
+/* what you will not eat: one tick per food group the engine knows, the same renderer in the
+   interview and under How you eat. Read fresh from the DOM at Save, like the other pickers. */
+function fieldAvoid(prefix,on){
+  return '<div class="ticks">'+Object.keys(TAGWORD).map(t=>'<label class="tick-pill" for="'+prefix+t+'"><input class="tick" type="checkbox" id="'+prefix+t+'" data-fk="'+prefix+t+'"'+(on.includes(t)?' checked':'')+'><span>'+esc(TAGWORD[t])+'</span></label>').join('')+'</div>';
+}
+function ticked(prefix,keys){return keys.filter(k=>{const el=document.getElementById(prefix+k);return el&&el.checked;});}
 function viewKitchenCard(){
   return '<section class="card" id="yourkitchen" data-family="clay"><div class="split"><span class="t-label">Your kitchen</span>'+
     '<span class="mono" style="color:var(--ink-3)">'+esc(CFG.equipment_order.map(e=>EQUIP[e].name).join(' · '))+'</span></div>'+
@@ -2027,7 +2087,7 @@ function viewOccasionsCard(){
     '<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="yosave" onclick="act.saveOccasions()">Save</button></div>'+
     (OMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(OMSG)+'</p>':'')+'</section>';
 }
-/* ---- THE STORY. What Plate is and the order it happens in, said once in five plain lines,
+/* ---- THE STORY. What Plateside is and the order it happens in, said once in five plain lines,
    because the first person it was shown to could not be told without a speech. It opens the
    interview and sits under Profile, drawn by one function so the two cannot drift. Food words
    throughout; the engine is named once and stays underneath. ---- */
@@ -2040,7 +2100,7 @@ const STORY=[
 ];
 function storyCard(opt){
   opt=opt||{};
-  let h='<section class="card'+(opt.cls?' '+opt.cls:'')+'" id="'+(opt.id||'story')+'"><div class="split"><span class="t-label">How Plate works</span><span class="mono" style="color:var(--ink-3)">in order</span></div>'+
+  let h='<section class="card'+(opt.cls?' '+opt.cls:'')+'" id="'+(opt.id||'story')+'"><div class="split"><span class="t-label">How Plateside works</span><span class="mono" style="color:var(--ink-3)">in order</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Blood work into dinner. The labs are the engine underneath; the screens speak food.</p><ol class="steps">';
   STORY.forEach(([t,d])=>{h+='<li><p><b>'+esc(t)+'.</b> '+esc(d)+'</p></li>';});
   return h+'</ol></section>';
@@ -2145,7 +2205,8 @@ function viewFirstRun(){
     '<div class="formgrid" style="margin-top:var(--s2)"><div class="field wide"><span>Plan</span><select id="fr-regimen" data-fk="fr-regimen">'+
     REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===regDefault?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' of '+total+' meals fit</option>').join('')+
     '<option value=""'+(regDefault===''?' selected':'')+'>No plan: any meal in the catalog</option></select></div>'+
-    '<div class="field"><span>People</span><input type="number" id="fr-people" data-fk="fr-people" min="1" max="100" step="1" value="'+esc(fmt(PORTIONS))+'"></div></div></section>';
+    '<div class="field"><span>People</span><input type="number" id="fr-people" data-fk="fr-people" min="1" max="100" step="1" value="'+esc(fmt(PORTIONS))+'"></div></div>'+
+    '<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat. A meal or a cold option that has it leaves the pool.</p>'+fieldAvoid('fr-avoid-',AVOID)+'</section>';
   h+='<section class="card"><span class="t-label">What you cook on</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A meal is written for each of these. Tick what your kitchen has.</p>'+
     fieldKitchen('fr-eq-',eqOn)+fieldTime('fr-time',20)+'</section>';
@@ -2161,7 +2222,7 @@ function viewFirstRun(){
     fieldBody('fr-')+'</section>';
   h+='<section class="card"><div class="actions"><button class="btn btn-eat" type="button" data-fk="fr-save" onclick="act.saveSetup()">Build my rotation</button></div>'+
     (FRMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(FRMSG)+'</p>':'')+
-    (LOCAL?'<p class="t-note" style="margin-top:var(--s3)">Already using Plate? Answer these once; a backup restores on the next screen.</p>':'')+'</section>';
+    (LOCAL?'<p class="t-note" style="margin-top:var(--s3)">Already using Plateside? Answer these once; a backup restores on the next screen.</p>':'')+'</section>';
   return h+'</div>';
 }
 /* ---- STORES: which stores are in play and, where two carry an item, which one ----------- */
@@ -2245,11 +2306,11 @@ function viewStoreEditor(){
   return h;
 }
 
-/* ---- YOUR DATA: on the client-side build, everything Plate knows is on this device ------ */
+/* ---- YOUR DATA: on the client-side build, everything Plateside knows is on this device ------ */
 function viewDevice(L){
   const d=L.device||{};
   return '<section class="card" data-family="frost"><span class="t-label">Your data</span>'+
-    '<p class="t-body" style="margin:var(--s2) 0 var(--s3)">Everything Plate knows is on this device: '+(d.reports||0)+' lab report'+(d.reports===1?'':'s')+', '+(d.results||0)+' stored result'+(d.results===1?'':'s')+', '+(d.files||0)+' files in all. Nothing is sent anywhere.</p>'+
+    '<p class="t-body" style="margin:var(--s2) 0 var(--s3)">Everything Plateside knows is on this device: '+(d.reports||0)+' lab report'+(d.reports===1?'':'s')+', '+(d.results||0)+' stored result'+(d.results===1?'':'s')+', '+(d.files||0)+' files in all. Nothing is sent anywhere.</p>'+
     '<p class="t-body" style="margin-bottom:var(--s3);color:var(--ink)">'+esc(PRIVACY)+'</p><p class="t-note" style="margin-bottom:var(--s3)">'+esc(PRIVACY_TEST)+'</p>'+
     '<p class="t-note" style="margin-bottom:var(--s3)">A backup is one file with all of it. Keep one after every lab report: a phone can clear a web app\'s storage it has not opened for a while, and the lab results are the part that cannot be typed back in. The app asks for one after each report for that reason.</p>'+
     (!standalone()?'<p class="t-note" style="margin-bottom:var(--s3)">'+esc(INSTALL)+'</p>':'')+
@@ -2277,9 +2338,9 @@ function viewProfile(){
        '<p class="t-note" style="margin-top:var(--s3)">If the name form does not load on your network, this one uses the address instead. It can change when the router reassigns it.</p>'+
        '<div class="code" style="margin-top:var(--s2)">'+esc(LAN.url_ip)+'</div>'+
        '<p class="t-note" style="margin-top:var(--s3)">The code on its own, for a phone that says “not paired”: <b>'+esc((LAN.url.split('token=')[1]||''))+'</b></p>'
-      :'<p class="t-body" style="margin-top:var(--s2)">This server is only answering this Mac. Start it with “Plate (phone reachable)” to reach it from a phone.</p>')+
+      :'<p class="t-body" style="margin-top:var(--s2)">This server is only answering this Mac. Start it with “Plateside (phone reachable)” to reach it from a phone.</p>')+
       '<p class="t-body" style="margin-top:var(--s4);color:var(--ink)">'+esc(PRIVACY)+'</p><p class="t-note" style="margin-top:var(--s1)">'+esc(PRIVACY_TEST)+'</p>'+
-      '<p class="t-note" style="margin-top:var(--s4)">Or take everything with you: a backup is one file with every report, result, row and log, and the client-side Plate restores from it on any device.</p>'+
+      '<p class="t-note" style="margin-top:var(--s4)">Or take everything with you: a backup is one file with every report, result, row and log, and Plateside on any other device restores from it.</p>'+
       '<div class="btnrow" style="margin-top:var(--s2)"><button class="btn" type="button" data-fk="bkup" onclick="act.backup()">Back up</button></div></section>';
   }
   let main='<section class="card" data-family="plum"><span class="t-label">Profile</span><div class="formgrid" style="margin-top:var(--s3)">'+
@@ -2326,7 +2387,7 @@ function render(){
   if(!S.init&&!S.setup){
     document.getElementById('app').innerHTML=viewFirstRun();
     document.getElementById('nav').innerHTML='';
-    document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATE</span><span></span>'+
+    document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATESIDE</span><span></span>'+
       '<button class="tog" type="button" onclick="act.theme()">'+(document.documentElement.dataset.theme==='dark'?'Dark':'Light')+'</button></div>';
     PAINTED=null;ENTER=null;JUST=null;
     return;
@@ -2342,13 +2403,13 @@ function render(){
       '<button class="btn" onclick="act.begin(false)">Starting from scratch</button></div>'+
       '<p class="t-note" style="margin-top:var(--s3)">Starting from scratch builds the full first run. Already own '+
       'some of it? Bump those on Kitchen and the list shrinks.</p></section>'+
-      (LOCAL?'<section class="card a-aside"><span class="t-label">Already using Plate?</span>'+
+      (LOCAL?'<section class="card a-aside"><span class="t-label">Already using Plateside?</span>'+
       '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">Bring everything across from a backup: your reports, your results, your stock and your log. Nothing is sent anywhere.</p>'+
       '<div class="filepick"><input type="file" id="rst0" data-fk="rst0" accept=".plate,.bin,application/octet-stream">'+
       '<button class="btn" type="button" data-fk="rst0btn" onclick="act.restore(\'rst0\')">Restore from a backup</button></div>'+
       (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>':'')+'</div>';
     document.getElementById('nav').innerHTML='';
-    document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATE</span><span></span>'+
+    document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATESIDE</span><span></span>'+
       '<button class="tog" type="button" onclick="act.theme()">'+(document.documentElement.dataset.theme==='dark'?'Dark':'Light')+'</button></div>';
     PAINTED=null;ENTER=null;JUST=null;
     return;
@@ -2365,7 +2426,7 @@ function render(){
   const fkey=cur?cur.getAttribute('data-fk'):null;
   document.getElementById('app').innerHTML=h;
   const dark=document.documentElement.dataset.theme==='dark';
-  document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATE</span>'+
+  document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATESIDE</span>'+
     '<span class="folio">MEAL '+(S.cursor+1)+' · CYCLE '+(Math.floor(S.cursor/N)+1)+'</span>'+
     '<button class="tog" type="button" data-fk="theme" onclick="act.theme()" aria-label="Switch to '+(dark?'light':'dark')+' mode">'+(dark?'Dark':'Light')+'</button></div>';
   document.getElementById('nav').innerHTML=VIEWS.map(([k,label])=>

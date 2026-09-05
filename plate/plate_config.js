@@ -26,11 +26,11 @@ export const SLOTS = 14;
 export const PORTIONS_MAX = 100;
 export const ZONE_ORDER = ['freezer', 'fridge', 'pantry'];
 export const PROFILE_KEYS = ['stores', 'store_picks'];              // the store choice, kept in profile.csv
-export const DIET_KEYS = ['equipment', 'hands_on_minutes', 'regimen', 'portions', 'occasions']; // the kitchen, the regimen, who eats and when, kept in diet.csv
+export const DIET_KEYS = ['equipment', 'hands_on_minutes', 'regimen', 'avoid', 'portions', 'occasions']; // the kitchen, the regimen, who eats and when, kept in diet.csv
 // the diet.csv rows the app itself writes: the choices, the day's numbers About you estimates,
 // and the plate: one factor per household that scales every recipe, and the date it last changed
 export const TARGET_ROWS = ['kcal', 'protein_g', 'fiber_g', 'sat_fat_g', 'added_sugar_g', 'deficit_kcal'];
-export const DIET_EDITABLE = ['regimen', 'portions', 'occasions', 'equipment', 'hands_on_minutes', 'plate', 'plate_since', ...TARGET_ROWS];
+export const DIET_EDITABLE = ['regimen', 'avoid', 'portions', 'occasions', 'equipment', 'hands_on_minutes', 'plate', 'plate_since', ...TARGET_ROWS];
 // The plate factor's bounds and step. Outside them a plan cannot be scaled that far: a recipe
 // written for one adult does not survive being cut below half or grown past 140 percent.
 export const PLATE_MIN = 0.5, PLATE_MAX = 1.4, PLATE_STEP = 0.05;
@@ -351,6 +351,13 @@ export function occasionsFromDiet(diet) {
   return v.length ? v : null;
 }
 
+/* What the person leaves out on top of the regimen, from diet.csv's `avoid` row: tags, `a|b`.
+   Empty or missing means nothing. */
+export function avoidFromDiet(diet) {
+  const v = list(get(truthy(diet) ? diet : {}, 'avoid', ''));
+  return v.length ? v : null;
+}
+
 /* The plate factor in play, from diet.csv's `plate` row: blank means 1, the recipes as written.
    Written by the app from the day's target, never typed. */
 export function plateFromDiet(diet) {
@@ -369,7 +376,7 @@ export function loadFor(home, profile, diet, plate = null) {
   const [shop, picks] = choicesFromProfile(profile);
   const [equipment, hands_on] = kitchenFromDiet(diet);
   return load(home, { shop, picks, equipment, hands_on, regimen: regimenFromDiet(diet), portions: portionsFromDiet(diet),
-    occasions: occasionsFromDiet(diet), plate: plate === null ? plateFromDiet(diet) : plate });
+    occasions: occasionsFromDiet(diet), plate: plate === null ? plateFromDiet(diet) : plate, avoid: avoidFromDiet(diet) });
 }
 
 /* The portions in play, from diet.csv's `portions` row: how many adult portions the food is
@@ -444,7 +451,7 @@ export function checkChoices(cfg, shop, picks) {
    regimen: the way of eating in play, by id from regimens.csv (null, or an unknown id: nothing left out). */
 export function load(home, opts = {}) {
   const opt = k => { const v = get(opts, k); return v === undefined ? null : v; };
-  const shop = opt('shop'), equipment = opt('equipment'), hands_on = opt('hands_on'), regimen = opt('regimen');
+  const shop = opt('shop'), equipment = opt('equipment'), hands_on = opt('hands_on'), regimen = opt('regimen'), avoidIn = opt('avoid');
   const occasions_in = opt('occasions');
   let picks = opt('picks');
   const portions_in = opt('portions');
@@ -542,6 +549,14 @@ export function load(home, opts = {}) {
   const regimens = loadRegimens(home);
   let reg = null;
   if (truthy(regimen)) reg = regimens.find(r => r.id === regimen) || null;
+  // What the person will not eat, on top of the regimen: the same rule, one more list. `eff`
+  // is what leaves food out; `reg` stays the plan by name, with its counts.
+  const avoid = sortedSet(pyIter(avoidIn || []).filter(t => TAGS.includes(t)));
+  let eff = reg;
+  if (avoid.length) {
+    eff = Object.assign({}, reg || { id: '', name: '', allows: [], excludes: [], note: '' });
+    eff.excludes = sortedSet([...eff.excludes, ...avoid]);
+  }
 
   const kits = {};
   for (const r of rows(home, 'kits')) {
@@ -580,7 +595,7 @@ export function load(home, opts = {}) {
       fiber_g: nut(num(get(r, 'fiber_g')), plate), kits: list(get(r, 'kits', '')), uses, portions,
       steps: list(get(r, 'steps', '')), needs, hands_on: num(get(r, 'hands_on')),
       cooking: {}, equipment: '', mode: '', temp_f: null, minutes: 0, tray: '', why_not: '',
-      contains, excluded: leavesOut(contains, reg),
+      contains, excluded: leavesOut(contains, eff),
       in_pool: declared[r.id], note: get(r, 'note', '') });
   }
   if (seen_slots.size !== SLOTS) {
@@ -711,7 +726,7 @@ export function load(home, opts = {}) {
     // words whether or not its block is on the table tonight
     const uses = usesOf(get(r, 'uses', ''), where, items, occ_by_id[occ_id].portions, plate);
     const contains = containsOf(uses, items);
-    const off = leavesOut(contains, reg);
+    const off = leavesOut(contains, eff);
     if (occ_id === rotation_occasion && !solo) { put_away = true; continue; }   // the cold block, put away beside another meal
     if (!has(by_slot, r.slot)) {
       by_slot[r.slot] = { id: r.slot, name: get(r, 'slot_name', '') || r.slot, occasion: occ_id, opts: [] };
@@ -741,7 +756,7 @@ export function load(home, opts = {}) {
     store_catalog, store_picks: Object.assign({}, picks), unsupplied,
     equipment: equip, equipment_order, equipment_catalog: equip_catalog,
     hands_on_minutes: hands_on, uncookable, portions: household, plate,
-    regimens, regimen: reg, excluded, cold_excluded,
+    regimens, regimen: reg, avoid, excluded, cold_excluded,
     occasions, occasion_catalog, rotation_occasion,
     rotations: pySorted(Object.keys(rotations)),
     zones, flavor };
@@ -969,6 +984,7 @@ export function removeStoreItem(home, store, item) {
 /* The note a fresh row gets when a key has never been written before. Only used the first time
    a key is set from the app; an installed home's own note is left alone otherwise. */
 const DIET_NOTES = {
+  avoid: 'What you will not eat, on top of the plan: food-group tags separated by |, e.g. dairy|pork. A meal or a cold option that has one leaves the pool. Chosen on first run and under Profile',
   regimen: 'How you eat, by id from regimens.csv; chosen under Profile',
   portions: 'Adult portions the food is cooked for; multiplies what a meal and the cold block '
             + 'consume, never the nutrition targets. Chosen under Profile',
@@ -998,6 +1014,7 @@ export function checkDiet(home, key, value) {
   if (!DIET_EDITABLE.includes(key)) throw new ConfigError(pyStr(key) + ' is not a setting the app writes');
   value = strip(optStr(value));
   if (key === 'regimen' && value && !loadRegimens(home).some(r => r.id === value)) throw new ConfigError('unknown regimen ' + pyReprStr(value));
+  if (key === 'avoid' && value) tagsOf(value, 'avoid');
   if (key === 'occasions' && value) {
     const known = new Set(loadOccasions(home, 1)[0].map(o => o.id));
     for (const occ_id of list(value)) {

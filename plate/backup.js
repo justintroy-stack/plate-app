@@ -57,9 +57,9 @@ export function readBackup(bytes) {
   const total = buf.length;
   const nl = buf.subarray(0, 64).indexOf(10);
   const head = nl < 0 ? null : /^plate-backup (\d+) (\d+)$/.exec(String.fromCharCode(...buf.subarray(0, nl)));
-  if (!head) throw new Error('This is not a Plate backup file.');
+  if (!head) throw new Error('This is not a Plateside backup file.');
   if (head[1] !== String(VERSION)) {
-    throw new Error('This backup is in a format this version of Plate cannot read (plate-backup ' + head[1] + ').');
+    throw new Error('This backup is in a format this version of Plateside cannot read (plate-backup ' + head[1] + ').');
   }
   const start = nl + 1, end = start + Number(head[2]);
   if (end > total) throw new Error('This backup file is incomplete: it ends inside its own index.');
@@ -67,7 +67,7 @@ export function readBackup(bytes) {
   try { index = JSON.parse(dec.decode(buf.subarray(start, end))); }
   catch (e) { throw new Error('This backup file is damaged: its index cannot be read.'); }
   if (!index || index.format !== FORMAT || index.version !== VERSION || !Array.isArray(index.files)) {
-    throw new Error('This backup file is damaged: its index is not a Plate index.');
+    throw new Error('This backup file is damaged: its index is not a Plateside index.');
   }
   const files = [];
   let off = end;

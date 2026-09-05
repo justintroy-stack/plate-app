@@ -15,7 +15,7 @@ import { loadDiet, buildDiet } from './diet.js';
 import { MarkerRegistry } from './markers.js';
 import { CsvStore } from './store.js';
 import * as pc from './plate_config.js';
-import { buildPlan, normalizeOrder } from './rotation.js';
+import { buildPlan, normalizeOrder, groupNote } from './rotation.js';
 import { proposal } from './body.js';
 import { loadBody } from './tracker.js';
 
@@ -49,6 +49,7 @@ export function payload(home, diet, cfg) {
   const out = Object.assign({}, cfg);
   out.plan = diet ? buildPlan(cfg, diet, currentOrder(home)) : null;
   out.plate_proposal = proposal(loadBody(home), loadDiet(home), loadProfile(home));
+  out.group_note = groupNote(cfg);
   out.labs = labsOnFile(home);
   return out;
 }
@@ -146,11 +147,21 @@ function migrateLog(home) {
 /* Take the row(s) for one cursor out of the log, keeping a copy first. Returns how many rows
    were removed. */
 export function removeLogged(home, cursor) {
+  return dropRows(home, r => r.cursor !== String(cursor));
+}
+
+/* one 'also had' row out of the log: the undo of an extra, matched by its stamp and its label,
+   because an extra belongs to no cursor */
+export function removeExtra(home, at, meal) {
+  return dropRows(home, r => !(r.kind === 'extra' && r.logged_at === at && r.meal === meal));
+}
+
+function dropRows(home, keepIf) {
   const t = home.read(MEAL_LOG);
   if (t == null) return 0;
   const { fieldnames, rows } = readDicts(t);
   const cols = fieldnames.length ? fieldnames : LOG_COLUMNS;
-  const keep = rows.filter(r => r.cursor !== String(cursor));
+  const keep = rows.filter(keepIf);
   if (keep.length === rows.length) return 0;
   home.copy(MEAL_LOG, BACKUP_DIR + '/meal_log-' + stamp(home) + '.csv');
   home.write(MEAL_LOG, formatDicts(cols, keep));
@@ -199,9 +210,23 @@ export function recordEvents(home, events) {
   const cfg = config(home);
   const meals = pc.mealIndex(cfg);
   const seen = loggedCursors(home);
-  const rows = [];
+  const rows = [], extras = [];
   for (const e of events || []) {
-    if (!e || typeof e !== 'object' || !('cursor' in e)) continue;
+    if (!e || typeof e !== 'object') continue;
+    if (e.kind === 'extra' || e.kind === 'undo_extra') {
+      // something from stock outside the plan: its own row, on no cursor, never deduplicated;
+      // its undo names the row by the stamp the device made and the label
+      const at = String(e.at || isoLocal(home.now())).slice(0, 19);
+      const label = String(e.meal || 'extra');
+      if (e.kind === 'extra') {
+        const kcal = e.kcal, pro = e.protein_g;
+        extras.push({ logged_at: at, cursor: '', meal_index: '', meal_id: 'extra', meal: label,
+                      kcal: (kcal == null || kcal === '') ? '' : kcal, protein_g: (pro == null || pro === '') ? '' : pro,
+                      kind: 'extra', note: e.note || 'also had, outside the plan' });
+      } else removeExtra(home, at, label);
+      continue;
+    }
+    if (!('cursor' in e)) continue;
     const c = toInt(e.cursor);
     if (c === null) continue;
     if (e.kind === 'undo') {
@@ -215,7 +240,8 @@ export function recordEvents(home, events) {
     rows.push(row(cfg, meals, e, c, at, 'stamped on the device at log time'));
   }
   if (rows.length) appendLog(home, pySorted(rows, r => r.cursor));
-  return rows.length;
+  if (extras.length) appendLog(home, extras);
+  return rows.length + extras.length;
 }
 
 /* The page persists after every change; a cursor increase means a meal was logged. The first

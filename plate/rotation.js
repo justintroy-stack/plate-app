@@ -97,6 +97,40 @@ export function dayEstimate(cfg) {
   return total;
 }
 
+/* One food group certain to land three or more times on a night of the rotation: the plate's
+   own tags plus every slot in play whose every live option carries the tag, so no turn of the
+   cold block avoids it, on three nights of the cycle at the least. The worst case, or null. A
+   note for the person to read, never a rule the planner acts on. A twin of rotation.group_note. */
+export function groupNote(cfg) {
+  const meals = mealIndex(cfg);
+  const certain = {};                              // tag -> the slots it lands in whatever they draw
+  for (const sl of cfg.cold) {
+    const opts = sl.opts.filter(o => !truthy(get(o, 'excluded')));
+    if (!opts.length) continue;
+    let common = new Set(opts[0].contains);
+    for (const o of opts.slice(1)) common = new Set([...common].filter(t => o.contains.includes(t)));
+    for (const tag of common) (certain[tag] = certain[tag] || []).push(sl.name);
+  }
+  const order = cfg.baseline;
+  const tags = new Set(Object.keys(certain));
+  for (const mid of order) for (const t of meals[mid].contains) tags.add(t);
+  let best = null;
+  for (const tag of sortedSet(tags)) {
+    const base = (certain[tag] || []).length;
+    const nights = order.filter(mid => meals[mid].contains.includes(tag));
+    const times = base + (nights.length ? 1 : 0);
+    const on = nights.length ? nights.length : order.length;
+    if (times < 3 || on < 3) continue;               // a night or two is not a pattern
+    const items = new Set();
+    for (const mid of nights) for (const k of Object.keys(meals[mid].uses)) if (cfg.items[k].tags.includes(tag)) items.add(cfg.items[k].name);
+    const cand = { tag, times, nights: on, of: order.length,
+                   slots: (certain[tag] || []).slice(), items: sortedSet(items) };
+    const key = [times, cand.nights];
+    if (best === null || pyCmp(key, best[0]) > 0) best = [key, cand];
+  }
+  return best ? best[1] : null;
+}
+
 export const PLATE_MIN = 0.5, PLATE_MAX = 1.4;
 
 /* The plate factor that makes a day of the plan, cooked as written, meet a calorie target: the

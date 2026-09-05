@@ -34,7 +34,7 @@ function stamp(v) {
 }
 
 function showError(title, detail) {
-  $('app').innerHTML = '<div class="stack"><section class="card a-hero" data-family="ember"><span class="t-label">Plate</span>'
+  $('app').innerHTML = '<div class="stack"><section class="card a-hero" data-family="ember"><span class="t-label">Plateside</span>'
     + '<h1 class="t-display" style="margin-top:var(--s3)">' + title + '</h1>'
     + '<p class="t-body" style="margin-top:var(--s3);color:var(--ink-2)"></p></section></div>';
   $('app').querySelector('p').textContent = detail;
@@ -55,7 +55,7 @@ function loadScript(src) {
   try {
     home = await loadHome();
   } catch (e) {
-    showError('This browser cannot keep your data.', 'Plate stores everything on the device in IndexedDB, and this browser refused to open it: ' + (e && e.message || e));
+    showError('This browser cannot keep your data.', 'Plateside stores everything on the device in IndexedDB, and this browser refused to open it: ' + (e && e.message || e));
     return;
   }
   const seeded = seedDefaults(home);
