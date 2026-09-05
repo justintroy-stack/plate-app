@@ -1,0 +1,360 @@
+/* Every /api/ call the page makes, answered from inside the page.
+
+   The page fetches the same paths it fetched from the Python server (labtrack/server.py), and
+   gets the same JSON back, so the page's own script is unchanged. window.fetch is wrapped: a
+   same-origin /api/ path is routed here, anything else goes to the real fetch. Each handler is
+   the server's handler with the disk replaced by the home in memory, and every write is
+   flushed to IndexedDB before the reply, so a reload after a save finds it. */
+import { flush, wipe } from './fs.js';
+import { readRows, formatDicts } from './csv.js';
+import { ConfigError, PyValueError, pyRound } from './py.js';
+import { MarkerRegistry } from './markers.js';
+import { CsvStore } from './store.js';
+import { loadProfile } from './policy.js';
+import { loadHistory, appendHistory } from './history.js';
+import { loadExplanations } from './explain.js';
+import { loadBody, loadIntake } from './tracker.js';
+import { buildDiet, checkBody, loadDiet, targetPreview, targetsFromProfile, ESTIMATE_KEYS } from './diet.js';
+import { plateFor } from './rotation.js';
+import { appendWeighIn, loadLog, stepPlate, summary as bodySummary } from './body.js';
+import { config as plateConfig } from './plate.js';
+import { today } from './pydate.js';
+import { buildSummary, buildTrend, buildPlan, suggestedDraw } from './planner.js';
+import { payload, payloadBuilt, getState, setState, recordEvents } from './plate.js';
+import * as pc from './plate_config.js';
+import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
+import { readPdf, configure } from './pdftext.js';
+import { backupFromHome, readBackup } from './backup.js';
+
+const RAW_DIR = 'labs/raw';
+const PROFILE_EDITABLE = ['risk_tier', 'draw_cadence_months', 'near_limit_pct', 'dob', 'sex', 'guideline_lens'];
+const CONFIG_FILES = ['markers', 'aliases', 'ignore', 'policy', 'targets', 'target_tiers', 'targets_functional', 'derived', 'explain', 'profile', 'history',
+                      'diet', 'diet_rules', 'exposure', 'meals', 'kits', 'cold_slots', 'items', 'store_items', 'stores', 'flavor_pantry',
+                      'equipment', 'cooking', 'regimens', 'occasions', 'rotations'];
+const SECOND_PASS = 'Not in this version yet.';
+
+function json(obj, status = 200) {
+  return new Response(JSON.stringify(obj), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+}
+function bytes(buf, type, name) {
+  const h = { 'Content-Type': type || 'application/octet-stream' };
+  if (name) h['Content-Disposition'] = 'attachment; filename="' + name + '"';
+  return new Response(buf, { status: 200, headers: h });
+}
+
+function writeProfile(home, key, value) {
+  /* one key in profile.csv, the personal file an upgrade never overwrites (server._write_profile) */
+  const path = 'config/profile.csv';
+  const text = home.read(path);
+  const rows = text == null ? [] : readRows(text);
+  let found = false;
+  for (const r of rows) if (r.key === key) { r.value = value; found = true; }
+  if (!found) rows.push({ key, value });
+  home.write(path, formatDicts(['key', 'value'], rows.map(r => ({ key: r.key, value: r.value }))));
+}
+
+function looksScanned(text) {
+  const pages = Math.max(1, (text.match(/\f/g) || []).length + (text.endsWith('\f') ? 0 : 1));
+  const alnum = (text.match(/[\p{L}\p{N}]/gu) || []).length;
+  return alnum / pages < 100;
+}
+
+async function bodyJson(init) {
+  const b = init && init.body;
+  if (!b) return {};
+  if (typeof b === 'string') return JSON.parse(b || '{}');
+  if (b instanceof ArrayBuffer || ArrayBuffer.isView(b)) return JSON.parse(new TextDecoder().decode(b) || '{}');
+  if (typeof b.text === 'function') return JSON.parse((await b.text()) || '{}');
+  return {};
+}
+async function bodyBytes(init) {
+  const b = init && init.body;
+  if (!b) return new Uint8Array(0);
+  if (b instanceof ArrayBuffer) return new Uint8Array(b);
+  if (ArrayBuffer.isView(b)) return new Uint8Array(b.buffer, b.byteOffset, b.byteLength);
+  if (typeof b.arrayBuffer === 'function') return new Uint8Array(await b.arrayBuffer());
+  if (typeof b === 'string') return new TextEncoder().encode(b);
+  return new Uint8Array(0);
+}
+
+let pdfjsMod = null;
+async function pdfjs() {
+  if (!pdfjsMod) {
+    pdfjsMod = await import('../vendor/pdfjs/pdf.min.mjs');
+    configure(pdfjsMod, new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href);
+  }
+  return pdfjsMod;
+}
+
+export function installApi(home, ctx) {
+  const realFetch = window.fetch.bind(window);
+  const registry = () => MarkerRegistry.load(home);
+  const store = () => new CsvStore(home);
+  const dietOrNull = () => { try { return buildDiet(home, store(), registry()); } catch (e) { return null; } };
+  const weigh = () => bodySummary(loadBody(home), loadDiet(home), loadProfile(home), loadLog(home), today(home.now.bind(home)));
+
+  const GET = {
+    '/api/summary': () => buildSummary(home, store(), registry()),
+    '/api/trend': (q) => buildTrend(home, store(), registry(), q.get('marker') || ''),
+    '/api/plan': (q) => {
+      const st = store();
+      const draw = q.get('draw') || suggestedDraw(home, st);
+      const plan = buildPlan(home, st, registry(), draw, q.get('cadence') ? parseInt(q.get('cadence'), 10) : null);
+      plan.suggested_draw = suggestedDraw(home, st);
+      return plan;
+    },
+    '/api/explain': () => loadExplanations(home),
+    '/api/diet': () => {
+      const d = buildDiet(home, store(), registry());
+      try { d.rotation = payload(home, d).plan; } catch (e) { d.rotation = null; d.rotation_error = String(e && e.message || e); }
+      return d;
+    },
+    '/api/history': () => ({ items: loadHistory(home).map(h => ({ date: h.date, category: h.category, item: h.item, status: h.status, detail: h.detail,
+                                                                   affects: h.affects, interval_months: h.interval_months, last_done: h.last_done })),
+                             profile: loadProfile(home), root: '', config_dir: '' }),
+    '/api/files': () => {
+      const rows = store().load();
+      const byFile = {};
+      for (const r of rows) byFile[r.source_file] = (byFile[r.source_file] || 0) + 1;
+      const imported = new Set([...loadBody(home).map(r => r.source), ...loadIntake(home).map(r => r.source)]);
+      const files = [], csvs = [];
+      for (const n of home.list(RAW_DIR)) {
+        const low = n.toLowerCase(), p = RAW_DIR + '/' + n;
+        if (low.endsWith('.pdf')) files.push({ file: p, name: n, rows_stored: byFile[p] || 0 });
+        else if ((low.endsWith('.csv') || low.endsWith('.xlsx') || low.endsWith('.xlsm')) && n !== 'previous_results_sheet.csv') csvs.push({ file: p, name: n, imported: imported.has(n) });
+      }
+      return { files, csvs, raw_dir: RAW_DIR, markers: catalog(registry()) };
+    },
+    '/api/body': () => {
+      const body = loadBody(home), intake = loadIntake(home);
+      const recent = intake.slice(-28);
+      const avg = (k) => { const xs = recent.filter(r => r[k] !== '' && r[k] != null).map(r => parseFloat(r[k])); return xs.length ? pyRound(xs.reduce((a, b) => a + b, 0) / xs.length, 0) : null; };
+      const avg28 = {};
+      for (const k of ['kcal', 'protein_g', 'fiber_g', 'sugar_g', 'expenditure_kcal']) avg28[k] = avg(k);
+      const d = dietOrNull();
+      return { body: body.slice(-90), latest: body.length ? body[body.length - 1] : null, intake_days: intake.length, avg28: recent.length ? avg28 : null,
+               weigh: weigh(), diet: d ? { targets: d.targets, baseline: d.baseline, calories: d.calories } : null,
+               estimate: targetsFromProfile(loadProfile(home), today(home.now.bind(home))) };
+    },
+    '/api/exposure': () => ({ error: SECOND_PASS }),
+    '/api/associations': () => ({ error: SECOND_PASS }),
+    '/api/lan': () => ({ lan: false, local: true, url: null, url_ip: null, host: null, ip: null,
+                         device: { files: home.paths().length, reports: home.list(RAW_DIR).filter(n => n.toLowerCase().endsWith('.pdf')).length,
+                                   results: home.exists('labs/results.csv') ? store().load().length : 0, build: ctx.local.version, pdfjs: ctx.local.pdfjs } }),
+    '/api/plate/config': () => payloadBuilt(home),
+    '/api/plate/plan': () => payloadBuilt(home).plan,
+    '/api/plate/state': (q) => ({ key: q.get('key') || '', value: getState(home, q.get('key') || '') }),
+    '/api/config': (q) => {
+      const name = q.get('name') || '';
+      if (!CONFIG_FILES.includes(name)) return [{ error: 'unknown config' }, 404];
+      return { name, path: 'config/' + name + '.csv', text: home.read('config/' + name + '.csv') || '' };
+    },
+    '/api/backup': () => bytes(backupFromHome(home), 'application/octet-stream'),
+  };
+
+  const POST = {
+    '/api/plate/events': async (q, init) => {
+      const body = await bodyJson(init);
+      const n = recordEvents(home, body.events || []);
+      await flush(home);
+      return { ok: true, logged: n };
+    },
+    '/api/plate/state': async (q, init) => {
+      const body = await bodyJson(init);
+      const key = q.get('key') || '';
+      if (!key || typeof body.value !== 'string') return [{ error: 'key and a string value are required' }, 400];
+      const [stored, winner] = setState(home, key, body.value);
+      await flush(home);
+      return { ok: true, stored, value: winner };
+    },
+    '/api/stores': async (q, init) => {
+      const body = await bodyJson(init);
+      if (body.remove) {
+        pc.removeStore(home, String(body.key || '').trim());
+        await flush(home);
+        return { ok: true };
+      }
+      const adding = !String(body.key || '').trim();
+      const key = pc.upsertStore(home, body);
+      if (adding) {
+        const chosen = String(loadProfile(home).stores || '').split('|').map(x => x.trim()).filter(Boolean);
+        if (chosen.length && !chosen.includes(key)) writeProfile(home, 'stores', chosen.concat([key]).join('|'));
+      }
+      await flush(home);
+      return { ok: true, key };
+    },
+    '/api/store_items': async (q, init) => {
+      const body = await bodyJson(init);
+      if (body.remove) pc.removeStoreItem(home, String(body.store || '').trim(), String(body.item || '').trim());
+      else pc.upsertStoreItem(home, body);
+      await flush(home);
+      return { ok: true };
+    },
+    '/api/diet': async (q, init) => {
+      const body = await bodyJson(init);
+      const key = String(body.key || '').trim(), value = String(body.value || '').trim();
+      if (!pc.DIET_EDITABLE.includes(key)) return [{ error: 'that setting is not editable here' }, 400];
+      pc.setDiet(home, key, value);
+      await flush(home);
+      return { ok: true };
+    },
+    '/api/target': async (q, init) => {
+      /* About you, before anything is written: the estimate for a set of answers, from the
+         same function the save writes with (server.py's /api/target) */
+      const body = await bodyJson(init);
+      return targetPreview(home, body.profile || {}, body.diet || {}, today(home.now.bind(home)));
+    },
+    '/api/setup': async (q, init) => {
+      /* first run, and Your target under Profile: every answer checked before any is written,
+         the day's numbers estimated from About you and written last (server.py's /api/setup) */
+      const body = await bodyJson(init);
+      const diet = body.diet || {};
+      const profile = {};
+      for (const [k, v] of Object.entries(body.profile || {})) profile[String(k).trim()] = v;
+      for (const key of Object.keys(diet)) pc.checkDiet(home, String(key).trim(), diet[key]);
+      for (const key of Object.keys(profile)) profile[key] = checkBody(key, profile[key]);
+      const stores = body.stores;
+      if (stores != null) {
+        const [shop, picks] = pc.choicesFromProfile({ stores: String(stores).trim() });
+        const problem = pc.checkChoices(pc.load(home), shop, picks);
+        if (problem) return [{ error: problem }, 400];
+      }
+      for (const key of Object.keys(diet)) pc.setDiet(home, String(key).trim(), diet[key]);
+      if (stores != null) writeProfile(home, 'stores', String(stores).trim());
+      for (const key of Object.keys(profile)) writeProfile(home, key, profile[key]);
+      let estimate = null, sized = null;
+      if (Object.keys(profile).length) {
+        estimate = targetsFromProfile(loadProfile(home), today(home.now.bind(home)));
+        if (!estimate.missing.length) {
+          for (const key of ESTIMATE_KEYS) pc.setDiet(home, key, pc.numstr(estimate[key]));
+          /* the plate, from the day's target as the plan will read it, against the plan just
+             chosen at scale 1; the weigh-in window restarts */
+          const d = dietOrNull();
+          const kcal = (d && d.targets && d.targets.kcal) || estimate.kcal;
+          sized = plateFor(plateConfig(home, 1), kcal);
+          pc.setDiet(home, 'plate', pc.numstr(sized.plate));
+          pc.setDiet(home, 'plate_since', today(home.now.bind(home)));
+        }
+      }
+      await flush(home);
+      return { ok: true, estimate, plate: sized };
+    },
+    '/api/weigh': async (q, init) => {
+      /* one weigh-in, typed here: the date a recorded fact, today unless given (server.py's /api/weigh) */
+      const body = await bodyJson(init);
+      const on = String(body.date || '').trim() || today(home.now.bind(home));
+      const point = appendWeighIn(home, on, body.weight_lb);
+      await flush(home);
+      const w = weigh(), v = w.verdict;
+      const prop = v.state === 'propose' ? { step: v.step, plate: v.plate, plate_next: v.plate_next, slope: v.slope, expected: v.expected,
+                                             points: v.points, window_days: v.window_days, goal: v.goal } : null;
+      return { ok: true, point, weigh: w, proposal: prop };
+    },
+    '/api/plate': async (q, init) => {
+      /* the person confirmed the scale's proposal: the plate steps, the window restarts */
+      const body = await bodyJson(init);
+      const value = stepPlate(home, body.plate, today(home.now.bind(home)));
+      await flush(home);
+      return { ok: true, plate: value };
+    },
+    '/api/occasions': async (q, init) => {
+      const body = await bodyJson(init);
+      pc.setOccasionPortions(home, String(body.id || '').trim(), body.value);
+      await flush(home);
+      return { ok: true };
+    },
+    '/api/import-tracker': async () => [{ error: 'A food tracking app\'s export is imported on the Mac in this version; the weight and intake it holds come across in a backup.' }, 400],
+    '/api/ingest': async (q, init) => {
+      /* a report file, rows a person typed or corrected on the preview, or both: the rows win
+         when given, with the report's own info behind them (server.py's /api/ingest) */
+      const body = await bodyJson(init);
+      const file = String(body.file || ''), date = body.date || null;
+      const reg = registry(), st = store();
+      let rows = [], info = null;
+      if (file) {
+        if (!file.toLowerCase().endsWith('.pdf') || !file.startsWith(RAW_DIR + '/') || file.includes('..') || !home.exists(file)) {
+          return [{ error: 'file must be a PDF inside ' + RAW_DIR }, 400];
+        }
+        const lib = await pdfjs();
+        const { text } = await readPdf(home.readBytes(file), { pdfjs: lib });
+        [rows, info] = candidates(home, { file, text, method: 'pdf.js ' + lib.version, registry: reg, date, scanned: looksScanned(text) });
+      }
+      if (body.rows != null) {
+        const lab = String(body.lab || '').trim() || (info ? info.lab : MANUAL_LAB);
+        [rows, info] = rowCandidates(home, { rows: body.rows, registry: reg, date: date || (info ? info.date : null), lab, base: info });
+      } else if (!file) return [{ error: 'a report file, or typed rows, are needed' }, 400];
+      const out = review(home, st, reg, rows, info, { supersede: !!body.supersede, replace: !!body.replace, commit: !!body.commit });
+      if (body.commit) await flush(home);
+      return out;
+    },
+    '/api/upload': async (q, init) => {
+      let name = String(q.get('name') || 'upload.pdf').split('/').pop().split('\\').pop();
+      name = name.replace(/[^A-Za-z0-9._ -]+/g, '_');
+      const low = name.toLowerCase();
+      if (!/\.(pdf|csv|xlsx|xlsm)$/.test(low)) return [{ error: 'only PDF lab reports, or a food tracking app\'s CSV or XLSX export, are accepted' }, 400];
+      const data = await bodyBytes(init);
+      const head = new TextDecoder('latin1').decode(data.slice(0, 4096));
+      if (low.endsWith('.pdf') && !head.startsWith('%PDF')) return [{ error: 'that does not look like a PDF' }, 400];
+      if (/\.(xlsx|xlsm)$/.test(low) && !head.startsWith('PK')) return [{ error: 'that does not look like a spreadsheet' }, 400];
+      if (low.endsWith('.csv') && !/[,;\t]/.test(head)) return [{ error: 'that does not look like a CSV' }, 400];
+      let dest = RAW_DIR + '/' + name;
+      const dot = name.lastIndexOf('.');
+      const base = RAW_DIR + '/' + name.slice(0, dot), ext = name.slice(dot);
+      let i = 2;
+      while (home.exists(dest)) { dest = base + ' (' + i + ')' + ext; i++; }
+      home.write(dest, data);
+      await flush(home);
+      return { file: dest };
+    },
+    '/api/history': async (q, init) => {
+      const body = await bodyJson(init);
+      if (!String(body.item || '').trim()) return [{ error: 'item is required' }, 400];
+      const row = {};
+      for (const k of ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done']) row[k] = body[k] == null ? '' : body[k];
+      appendHistory(home, row);
+      await flush(home);
+      return { ok: true };
+    },
+    '/api/profile': async (q, init) => {
+      const body = await bodyJson(init);
+      const key = String(body.key || '').trim(), value = String(body.value || '').trim();
+      if (!PROFILE_EDITABLE.includes(key) && !pc.PROFILE_KEYS.includes(key)) return [{ error: 'that profile key is not editable here' }, 400];
+      if (pc.PROFILE_KEYS.includes(key)) {
+        const [shop, picks] = pc.choicesFromProfile({ [key]: value });
+        const problem = pc.checkChoices(pc.load(home), shop, picks);
+        if (problem) return [{ error: problem }, 400];
+      }
+      writeProfile(home, key, value);
+      await flush(home);
+      return { ok: true };
+    },
+    '/api/restore': async (q, init) => {
+      const data = await bodyBytes(init);
+      const { files } = readBackup(data);
+      await wipe();
+      home.files.clear();
+      for (const f of files) home.write(f.path, f.bytes);
+      await flush(home);
+      return { ok: true, files: files.length };
+    },
+  };
+
+  window.fetch = async function (input, init) {
+    const url = new URL(typeof input === 'string' ? input : input.url, location.href);
+    if (url.origin !== location.origin || !url.pathname.startsWith('/api/')) return realFetch(input, init);
+    const method = ((init && init.method) || (typeof input !== 'string' && input.method) || 'GET').toUpperCase();
+    const table = method === 'POST' ? POST : GET;
+    const fn = table[url.pathname];
+    if (!fn) return json({ error: 'not found' }, 404);
+    try {
+      const r = await fn(url.searchParams, init || {});
+      if (r instanceof Response) return r;
+      if (Array.isArray(r) && r.length === 2 && typeof r[1] === 'number') return json(r[0], r[1]);
+      return json(r);
+    } catch (e) {
+      console.error(url.pathname, e);
+      const status = (e instanceof ConfigError || e instanceof PyValueError || (e && e.name === 'ValueError')) ? 400 : 500;
+      return json({ error: String(e && e.message || e) }, status);
+    }
+  };
+}

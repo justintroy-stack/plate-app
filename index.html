@@ -1,0 +1,770 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Plate">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F1F3F2">
+<title>Plate</title>
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="preload" href="fonts/plate-sans.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/plate-mono.woff2" as="font" type="font/woff2" crossorigin>
+<style>
+/* PLATE — the design system for every surface.
+
+   Light is the identity. Tonight is the one saturated card on the page and everything
+   else sits quiet around it: every screen is cards on the GROUND, and nothing is
+   separated by a hairline. The oven chamber this file opened with was the previous answer: a dark, hot
+   box for Tonight. It read well and it fought the rule that light comes first, so the
+   heat moved to the action and the plate took the card. DESIGN.md has the whole system.
+   The previous system carried every division on a 0.33px rule at 1.26:1 contrast, which is
+   invisible on a phone in daylight. Ember is heat and the single action that matters. Frost
+   is everything cold: the freezer, the block eaten while the oven runs, stock on hand.
+
+   Inlined into every page at serve time by plate.dress(), so a page cannot half-load and the
+   phone needs no second request to look right.
+
+   The typefaces are self-hosted in ui/fonts and named by role, not by family: one sans for
+   everything written for a person, and a mono for figures, codes and anything the oven
+   would display. The serif the sentences used to be set in went with the Markers step. */
+
+/* Self-hosted, subset to the characters this app prints. Before these were local the pages
+   fetched three families from Google and fell back to Helvetica the moment the phone lost
+   signal. The fallbacks below are metric-matched to what a Mac and an iPhone actually have,
+   so a first paint before the files arrive changes the texture and not the layout. */
+@font-face{font-family:'Plate Sans';src:url('fonts/plate-sans.woff2') format('woff2-variations'),
+  url('fonts/plate-sans.woff2') format('woff2');font-weight:400 800;font-style:normal;font-display:swap}
+@font-face{font-family:'Plate Sans';src:url('fonts/plate-italic.woff2') format('woff2');
+  font-weight:400;font-style:italic;font-display:swap}
+@font-face{font-family:'Plate Mono';src:url('fonts/plate-mono.woff2') format('woff2-variations'),
+  url('fonts/plate-mono.woff2') format('woff2');font-weight:400 600;font-style:normal;font-display:swap}
+
+/* ╔══════════════════════════════════════════════════════════════════════╗
+   ║  TOKENS — the design system. ui/design.html is its specimen and the   ║
+   ║  place to look at it; this is where it runs. Adoption is by screen:   ║
+   ║  the tokens land first, the components follow one surface at a time.  ║
+   ╚══════════════════════════════════════════════════════════════════════╝ */
+:root{
+  color-scheme: light;
+
+  /* Ground and surface. A section is separated by its GROUND, never by a line. */
+  --enamel:#F2F2EF; --surface:#FFFFFF; --sunk:#E7E8E2; --hair:#E4E5DE;
+  --ink:#12150E; --ink-2:#4B5045; --ink-3:#7C8274;
+
+  /* FAMILIES, one per domain. Five tones, five jobs:
+       wash  tile and pill background            (near-black, or the family ink)
+       lit   hero fill, light chart bar          (near-black text on it)
+       core  glyph, heavy chart bar, dot         (NEVER a text background)
+       deep  the one fill that carries white text    (AA measured)
+       ink   the family as text on white or wash     (AA measured)          */
+  --sprout-wash:#EAF6D2; --sprout-lit:#B6E44F; --sprout:#79B517; --sprout-deep:#4F7A0C; --sprout-ink:#3F6606;
+  --ember-wash:#FDE7E0;  --ember-lit:#FF8A6B;  --ember:#EE6B4D;  --ember-deep:#C0472A;  --ember-ink:#A33A20;
+  --frost-wash:#E1F0F7;  --frost-lit:#9FCFE6;  --frost:#4A9BC4;  --frost-deep:#2A7BA6;  --frost-ink:#1F5C80;
+  --clay-wash:#F0E8DA;   --clay-lit:#D9C7A8;   --clay:#A8875C;   --clay-deep:#8A6A3C;   --clay-ink:#6B5028;
+  --plum-wash:#F5E5EA;   --plum-lit:#D9AEBD;   --plum:#9C6B7E;   --plum-deep:#7E4A5D;   --plum-ink:#6A3A4C;
+
+  --on-lit:#12150E;      /* text on any -wash or -lit */
+  --on-deep:#FFFFFF;     /* text on any -deep, and nowhere else */
+
+  /* Radius. Concentric: an inner radius is the outer minus its padding. */
+  --r-xs:8px; --r-sm:12px; --r-md:18px; --r-lg:26px; --r-xl:34px; --r-pill:999px;
+
+  /* Space, 4pt. */
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:44px; --s9:64px;
+  --gutter:16px; --gap:12px;
+
+  /* Lift. Soft, wide, low. A card is lifted, never outlined. */
+  --lift-1:0 1px 2px rgba(18,21,14,.04), 0 6px 16px rgba(18,21,14,.05);
+  --lift-2:0 2px 6px rgba(18,21,14,.06), 0 18px 40px rgba(18,21,14,.10);
+  --lift-3:0 8px 20px rgba(18,21,14,.10), 0 34px 70px rgba(18,21,14,.18);
+
+  --sans:'Plate Sans','Archivo',-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;
+  --mono:'Plate Mono','DM Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+
+  /* Motion. Four durations, three curves. */
+  --d-press:120ms; --d-state:220ms; --d-enter:380ms; --d-hero:620ms;
+  --ez:cubic-bezier(.22,.72,.24,1);           /* the default */
+  --ez-out:cubic-bezier(.16,1,.3,1);          /* arrivals */
+  --ez-spring:cubic-bezier(.34,1.42,.5,1);    /* commitment */
+
+  /* The nav is 58 here and 66 in the specimen: 66 is the height a raised centre
+     action needs, and it arrives with the screen that adopts one. He reported the
+     bar being too tall once already, so it does not grow before then. */
+  --navh:58px; --masth:44px;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --enamel:#101210; --surface:#191C18; --sunk:#0B0D0A; --hair:#262A24;
+    --ink:#E9ECE4; --ink-2:#B0B6A9; --ink-3:#868D80;
+    --sprout-wash:#1C2609; --sprout-lit:#A9DB52; --sprout:#8AC72A; --sprout-deep:#6FA512; --sprout-ink:#BCE472;
+    --ember-wash:#2A1610;  --ember-lit:#FF9C80;  --ember:#F2795D;  --ember-deep:#DC5636;  --ember-ink:#FFA588;
+    --frost-wash:#0F2330;  --frost-lit:#8FC7E2;  --frost:#5FAAD0;  --frost-deep:#3E8FBA;  --frost-ink:#95CDE8;
+    --clay-wash:#241D12;   --clay-lit:#CBB694;   --clay:#BC9A6B;   --clay-deep:#9E7C4A;   --clay-ink:#D9C09A;
+    --plum-wash:#241820;   --plum-lit:#CD9DAE;   --plum:#B27E92;   --plum-deep:#95596E;   --plum-ink:#D7A9BA;
+    --on-lit:#12150E; --on-deep:#0B0D0A;
+    --lift-1:0 1px 2px rgba(0,0,0,.40), 0 6px 16px rgba(0,0,0,.30);
+    --lift-2:0 2px 6px rgba(0,0,0,.50), 0 18px 40px rgba(0,0,0,.40);
+    --lift-3:0 8px 20px rgba(0,0,0,.55), 0 34px 70px rgba(0,0,0,.50);
+}}
+:root[data-theme="dark"]{
+    color-scheme: dark;
+    --enamel:#101210; --surface:#191C18; --sunk:#0B0D0A; --hair:#262A24;
+    --ink:#E9ECE4; --ink-2:#B0B6A9; --ink-3:#868D80;
+    --sprout-wash:#1C2609; --sprout-lit:#A9DB52; --sprout:#8AC72A; --sprout-deep:#6FA512; --sprout-ink:#BCE472;
+    --ember-wash:#2A1610;  --ember-lit:#FF9C80;  --ember:#F2795D;  --ember-deep:#DC5636;  --ember-ink:#FFA588;
+    --frost-wash:#0F2330;  --frost-lit:#8FC7E2;  --frost:#5FAAD0;  --frost-deep:#3E8FBA;  --frost-ink:#95CDE8;
+    --clay-wash:#241D12;   --clay-lit:#CBB694;   --clay:#BC9A6B;   --clay-deep:#9E7C4A;   --clay-ink:#D9C09A;
+    --plum-wash:#241820;   --plum-lit:#CD9DAE;   --plum:#B27E92;   --plum-deep:#95596E;   --plum-ink:#D7A9BA;
+    --on-lit:#12150E; --on-deep:#0B0D0A;
+    --lift-1:0 1px 2px rgba(0,0,0,.40), 0 6px 16px rgba(0,0,0,.30);
+    --lift-2:0 2px 6px rgba(0,0,0,.50), 0 18px 40px rgba(0,0,0,.40);
+    --lift-3:0 8px 20px rgba(0,0,0,.55), 0 34px 70px rgba(0,0,0,.50);
+}
+
+/* One attribute recolours a card, a screen, a whole domain. A sixth domain — a
+   second eater, a new regimen — is one more line here, not a rewrite. */
+[data-family="sprout"]{--wash:var(--sprout-wash);--lit:var(--sprout-lit);--core:var(--sprout);--deep:var(--sprout-deep);--fam-ink:var(--sprout-ink)}
+[data-family="ember"] {--wash:var(--ember-wash); --lit:var(--ember-lit); --core:var(--ember); --deep:var(--ember-deep); --fam-ink:var(--ember-ink)}
+[data-family="frost"] {--wash:var(--frost-wash); --lit:var(--frost-lit); --core:var(--frost); --deep:var(--frost-deep); --fam-ink:var(--frost-ink)}
+[data-family="clay"]  {--wash:var(--clay-wash);  --lit:var(--clay-lit);  --core:var(--clay);  --deep:var(--clay-deep);  --fam-ink:var(--clay-ink)}
+[data-family="plum"]  {--wash:var(--plum-wash);  --lit:var(--plum-lit);  --core:var(--plum);  --deep:var(--plum-deep);  --fam-ink:var(--plum-ink)}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--enamel);color:var(--ink);font-family:var(--sans);
+  font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4,p,ol,ul,figure{margin:0}
+ol,ul{padding:0;list-style:none}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
+img,svg{display:block;max-width:100%}
+:focus-visible{outline:2px solid var(--ember);outline-offset:3px;border-radius:5px}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;
+    transition-duration:.01ms!important;scroll-behavior:auto!important}
+}
+
+/* ╔══════════════════════════════════════════════════════════════════════╗
+   ║  COMPONENTS — the specimen's parts, adopted screen by screen. Each   ║
+   ║  arrives with the first screen that needs it: the Rotation brought   ║
+   ║  the type scale, card, chip, stat, row, pill, strip and stack.       ║
+   ║  The Kitchen brought the button, iconbtn, tiles, bars, gauge, pile.  ║
+   ║  Markers brought the range scale, the spark, the chips as pills.     ║
+   ║  Tonight brought the tick and the arrival; every tab is cards now.   ║
+   ╚══════════════════════════════════════════════════════════════════════╝ */
+
+/* TYPE — one family. Enormous number, tiny label. */
+.t-hero   {font-size:56px;line-height:.92;font-weight:780;letter-spacing:-.035em}
+.t-display{font-size:34px;line-height:1.04;font-weight:720;letter-spacing:-.028em}
+.t-title  {font-size:22px;line-height:1.16;font-weight:660;letter-spacing:-.018em}
+.t-head   {font-size:17px;line-height:1.26;font-weight:620;letter-spacing:-.011em}
+.t-body   {font-size:15px;line-height:1.5;font-weight:450}
+.t-note   {font-size:13px;line-height:1.38;font-weight:480;color:var(--ink-2)}
+.t-label  {font-size:11px;line-height:1;font-weight:680;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.t-unit   {font-size:13px;font-weight:560;color:var(--ink-3);letter-spacing:0}
+.mono     {font-family:var(--mono);font-size:12px;letter-spacing:-.01em}
+
+/* CARD — four weights. A screen carries at most ONE lit or solid card. */
+.card{background:var(--surface);border-radius:var(--r-lg);padding:var(--s5);box-shadow:var(--lift-1);
+  position:relative;overflow:hidden}
+/* a jump to a card (a tile on Kitchen) lands it under the masthead, not behind it */
+.card{scroll-margin-top:calc(var(--masth) + env(safe-area-inset-top) + var(--s3))}
+/* a card that is a tap (a way in, a deadline) is a button, and reads like the rest */
+button.card{width:100%;text-align:left}
+.card--tint {background:var(--wash);box-shadow:none}
+.card--lit  {background:var(--lit);color:var(--on-lit);box-shadow:var(--lift-2)}
+.card--solid{background:var(--deep);color:var(--on-deep);box-shadow:var(--lift-2)}
+.card--lit .t-label,.card--solid .t-label{color:inherit;opacity:.62}
+.card--lit .t-note, .card--solid .t-note {color:inherit;opacity:.72}
+.card--lit .t-unit, .card--solid .t-unit {color:inherit;opacity:.66}
+.card--tint .t-label{color:var(--fam-ink);opacity:.75}
+.split{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s3)}
+
+/* MOTIF — the plate seen from above in the family's own colours, until there is a photograph. */
+.motif{position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(circle at 76% 30%, color-mix(in srgb,var(--lit) 92%, transparent) 0 26%, transparent 26.5%),
+    radial-gradient(circle at 76% 30%, transparent 0 34%, color-mix(in srgb,var(--lit) 55%, transparent) 34.5% 38%, transparent 38.5%),
+    radial-gradient(circle at 76% 30%, transparent 0 46%, color-mix(in srgb,var(--lit) 26%, transparent) 46.5% 48%, transparent 48.5%),
+    linear-gradient(140deg, color-mix(in srgb,var(--wash) 90%, transparent), transparent 62%)}
+
+/* CHIP — an icon in a soft holder. The glyph is the family core. */
+.chip{width:38px;height:38px;border-radius:var(--r-sm);background:var(--wash);color:var(--core);
+  display:grid;place-items:center;flex:none}
+.chip--round{border-radius:var(--r-pill)}
+.chip--lg{width:46px;height:46px;border-radius:var(--r-md)}
+.chip--onlit{background:rgba(255,255,255,.42);color:var(--on-lit)}
+.chip--onsolid{background:rgba(255,255,255,.18);color:var(--on-deep)}
+.chip--ontint{background:color-mix(in srgb,var(--surface) 55%, transparent)}   /* the glyph stays the family core */
+.chip svg{width:20px;height:20px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.chip--lg svg{width:24px;height:24px}
+
+/* STAT — a label, a number set large, a quiet unit. */
+.stat{display:flex;flex-direction:column;gap:var(--s2)}
+.num{font-weight:780;letter-spacing:-.035em;line-height:.9;font-variant-numeric:tabular-nums}
+.num--xl{font-size:52px}
+.num--lg{font-size:34px}
+.num--md{font-size:26px}
+.num.word{font-size:18px;font-weight:700;letter-spacing:-.01em;line-height:1.1}
+.numrow{display:flex;align-items:baseline;gap:var(--s2)}
+
+/* ROW — a list item: a thumb or a chip, two lines, a trailing control. */
+.row{display:flex;align-items:center;gap:var(--s3);padding:var(--s3) 0;width:100%;text-align:left}
+.row + .row{border-top:1px solid var(--hair)}
+.row__body{flex:1;min-width:0}
+.row__title{display:block;font-size:15.5px;font-weight:620;letter-spacing:-.012em;color:var(--ink);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row__meta{display:block;font-size:12.5px;color:var(--ink-3);font-weight:500;margin-top:1px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row__note{display:block;font-size:12.5px;line-height:1.4;color:var(--ink-2);font-weight:500;margin-top:4px}
+.row__thumb{width:52px;height:52px;border-radius:var(--r-sm);flex:none;position:relative;overflow:hidden;
+  background:var(--wash)}
+.row__thumb .motif{border-radius:inherit}
+
+/* PILL — a state, never a verdict. Outside a family it is the ghost pill; the two states the
+   ingest and draw tables mark are restated here. */
+.pill{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 10px;border-radius:var(--r-pill);
+  background:var(--wash,var(--sunk));color:var(--fam-ink,var(--ink-2));font-size:11.5px;font-weight:660;
+  letter-spacing:-.005em;flex:none;white-space:nowrap}
+.pill--ghost{background:var(--sunk);color:var(--ink-2)}
+.pill.hot{background:var(--ember-wash);color:var(--ember-ink)}
+.pill.ok{background:var(--sprout-wash);color:var(--sprout-ink)}
+.dot{width:7px;height:7px;border-radius:var(--r-pill);background:var(--core);flex:none}
+
+/* STRIP — the rotation, not a week (spec §7). The current meal is the one deep fill, meals
+   already logged sit behind it, and every number is a meal, never a day. */
+.strip{display:flex;gap:var(--s1);justify-content:space-between}
+.strip button{flex:1;padding:var(--s2) 0;border-radius:var(--r-md);text-align:center;
+  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
+.strip span{display:block;font-size:10.5px;font-weight:640;color:var(--ink-3);letter-spacing:.04em}
+.strip b{display:block;font-size:15px;font-weight:660;margin-top:3px;letter-spacing:-.01em}
+.strip [aria-current]{background:var(--deep);color:var(--on-deep)}
+.strip [aria-current] span{color:inherit;opacity:.7}
+.strip [data-logged]{color:var(--ink-3);cursor:default}
+.strip--meals b{margin-top:0}
+/* on a lit card the buttons get a faint holder and logged meals recede in the card's own ink */
+.strip--onlit button{background:rgba(255,255,255,.34)}
+.strip--onlit [data-logged]{color:var(--on-lit);opacity:.5;background:rgba(255,255,255,.18)}
+.strip--onlit [aria-current]{background:var(--deep);color:var(--on-deep);opacity:1}
+
+/* STACK — a screen made of cards: one column on the phone, hero and aside beside the main
+   column on the Mac (the wide rule is with the other wide rules at the end). */
+.stack{display:grid;grid-template-columns:1fr;grid-template-areas:"hero" "main" "aside";gap:var(--gap);
+  padding:12px var(--gutter) var(--s6)}
+.a-hero{grid-area:hero}.a-main{grid-area:main}.a-aside{grid-area:aside}
+
+/* PILE — a stack inside a stack area: several cards where the grid gives one slot. */
+.pile{display:grid;gap:var(--gap);align-content:start}
+
+/* TILES — the ways in. One per store, one per zone: muted, tappable, a number each. An odd
+   last tile takes the whole row rather than leaving a hole. */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:var(--gap)}
+.tile{background:var(--wash);border-radius:var(--r-lg);padding:var(--s4);min-height:132px;
+  display:flex;flex-direction:column;justify-content:space-between;text-align:left;
+  transition:transform var(--d-press) var(--ez)}
+.tile:active,.tile.pressed{transform:scale(.972)}
+.tile:last-child:nth-child(odd){grid-column:1/-1}
+.tile__top{display:flex;align-items:flex-start;justify-content:space-between}
+.tile__ico{color:var(--core)}
+.tile__ico svg{width:24px;height:24px;stroke-width:1.5}
+.tile__go{width:30px;height:30px;border-radius:var(--r-pill);background:color-mix(in srgb,var(--core) 16%, transparent);
+  color:var(--fam-ink);display:grid;place-items:center}
+.tile__go svg{width:15px;height:15px;stroke-width:1.8}
+.tile__t{display:block;font-size:19px;font-weight:680;letter-spacing:-.02em;color:var(--ink)}
+.tile__s{display:block;font-size:12.5px;color:var(--fam-ink);font-weight:520;margin-top:2px}
+
+/* BARS — rounded caps in the family core and a hatched ghost for the line behind them. The
+   markup carries the finished height; a bump redraws them from zero, because that is the action. */
+.bars{display:flex;align-items:flex-end;gap:var(--s2);height:96px}
+.barcol{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:var(--s2);height:100%;
+  justify-content:flex-end}
+.bartrack{position:relative;width:100%;flex:1;display:flex;align-items:flex-end;justify-content:center}
+.ghost{position:absolute;bottom:0;left:50%;transform:translateX(-50%);width:46%;border-radius:var(--r-pill);
+  background:repeating-linear-gradient(-45deg,color-mix(in srgb,currentColor 22%,transparent) 0 2px,transparent 2px 5px)}
+.bar{position:relative;width:46%;border-radius:var(--r-pill);background:var(--lit)}
+.bar--core{background:var(--core)}
+.barcap{font-size:10.5px;font-weight:640;color:var(--ink-3);position:absolute;left:50%;transform:translateX(-50%);
+  bottom:calc(100% + 5px);white-space:nowrap}
+.barlbl{font-size:11px;font-weight:600;color:var(--ink-3);max-width:100%;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.card--lit .barcap,.card--lit .barlbl{color:var(--on-lit);opacity:.72}
+.bars.fill .bar{animation:barfill var(--d-hero) var(--ez-out) both}
+@keyframes barfill{from{height:0}}
+
+/* GAUGE — the slim track under a stock row: how much of the pack is left. Core on sunk; low
+   is ember; an item being eaten down on purpose is ink. */
+.gauge{display:block;height:5px;max-width:220px;border-radius:var(--r-pill);background:var(--sunk);margin-top:7px;
+  overflow:hidden}
+.gauge i{display:block;height:100%;border-radius:inherit;background:var(--core,var(--frost))}
+.gauge i.low{background:var(--ember)}
+.gauge i.out{background:var(--ink-3)}
+.row__note--hot{color:var(--ember-ink)}
+.row__val{font-weight:700;font-size:15px;letter-spacing:-.01em;color:var(--ink);flex:none;font-variant-numeric:tabular-nums}
+
+/* SCALE — a marker against the range the lab printed on that report, never one this app
+   invented. The band is that range in the family's lit tone, the dot is the number in its core,
+   the tick is the draw before, and the band's own two numbers sit under its edges. No colour in
+   it means good or bad. The dot is emitted in place; it springs in only on the render after a
+   report is committed, because that is the action. */
+.scale{padding-top:var(--s5)}
+.scaletrack{position:relative;height:10px;border-radius:var(--r-pill);background:var(--sunk)}
+.scaleband{position:absolute;top:0;bottom:0;border-radius:var(--r-pill);background:var(--lit)}
+.scaledot{position:absolute;top:50%;width:18px;height:18px;border-radius:var(--r-pill);background:var(--core);
+  box-shadow:0 0 0 3.5px var(--surface),var(--lift-1);transform:translate(-50%,-50%)}
+.scale.fill .scaledot{animation:dotin var(--d-hero) var(--ez-spring) 120ms both}
+@keyframes dotin{from{transform:translate(-50%,-50%) scale(0)}}
+.scaleprev{position:absolute;top:-9px;width:2px;height:7px;border-radius:1px;background:var(--ink-3);transform:translateX(-50%)}
+.scaleends{position:relative;height:15px;margin-top:var(--s2)}
+.scaleends span{position:absolute;transform:translateX(-50%);color:var(--ink-3);white-space:nowrap}
+
+/* SPARK — a trend drawn small, in the family core. The line is data and carries no verdict. */
+.spark{display:block;width:100%;height:44px;margin-top:var(--s4)}
+.spark path{fill:none;stroke:var(--core,var(--ink));stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;
+  vector-effect:non-scaling-stroke}
+
+/* a marker row's well: its scale, its trend, the facts, the way to every draw */
+.mk__in{padding:2px 0 var(--s4)}
+.mk__in .facts{grid-template-columns:96px 1fr}
+.mk__in .btn--ink{width:100%;margin-top:var(--s4)}
+
+/* CHIPS — Markers' own sub-views, in content, one row of pills; the current one is ink */
+.chips{display:flex;gap:var(--s2);overflow-x:auto;padding:12px var(--gutter) 0;scrollbar-width:none;
+  -webkit-overflow-scrolling:touch}
+.chips::-webkit-scrollbar{display:none}
+.chips button{flex:none;height:36px;padding:0 14px;border-radius:var(--r-pill);background:var(--sunk);color:var(--ink-2);
+  font-size:13.5px;font-weight:640;letter-spacing:-.01em;white-space:nowrap;
+  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
+.chips button[aria-current="true"]{background:var(--ink);color:var(--enamel)}
+
+/* ---------- the hero: tonight, on a plate --------------------------------
+   This was the oven chamber: a dark box with an ember glow breathing at its
+   floor. The design system puts ONE saturated card on a light ground instead,
+   and light is the identity, so the heat moved to the action and the plate took
+   the card. It is the system's lit card now, first in Tonight's stack; what is
+   its own is a sheet's radius, the plate seen from above, the meal's name and
+   the appliance readout. Nothing here moves because the screen was quiet. */
+.hero{border-radius:var(--r-xl);padding:var(--s5) var(--s5) var(--s6)}
+/* the plate seen from above, in the family's own light */
+.hero::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:
+    radial-gradient(circle at 88% 14%, rgba(255,255,255,.50) 0 21%, transparent 21.5%),
+    radial-gradient(circle at 88% 14%, transparent 0 28%, rgba(255,255,255,.30) 28.5% 31%, transparent 31.5%),
+    radial-gradient(circle at 88% 14%, transparent 0 38%, rgba(255,255,255,.16) 38.5% 40%, transparent 40.5%)}
+.hero-in{position:relative;z-index:2}
+
+/* the masthead's two words: the brand, and the meal and cycle count */
+.brand{font-family:var(--sans);font-weight:800;letter-spacing:.2em;font-size:11.5px;color:var(--ink)}
+.folio{color:var(--ink-3);display:flex;align-items:center;gap:5px}
+
+.hero-eyebrow{display:flex;align-items:center;gap:8px;font-family:var(--mono);
+  font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--on-lit);opacity:.64}
+.hero-eyebrow .pip{width:6px;height:6px;border-radius:50%;background:var(--ember-deep);flex:none}
+
+.mealname{font-size:clamp(40px,12.5vw,56px);line-height:.92;font-weight:800;font-stretch:120%;
+  letter-spacing:-.038em;margin:var(--s3) 0 0;text-wrap:balance;color:var(--on-lit)}
+.mealsub{font-size:18px;line-height:1.4;color:var(--on-lit);opacity:.76;
+  margin-top:var(--s3)}
+
+/* the readout, the appliance panel, now a well inside the card */
+.readout{display:grid;grid-template-columns:repeat(3,1fr);margin-top:var(--s5);
+  border-radius:var(--r-md);overflow:hidden;background:rgba(255,255,255,.46)}
+.readout div{padding:12px 13px}
+.readout div+div{border-left:1px solid rgba(255,255,255,.62)}
+.readout .v{font-family:var(--mono);font-size:24px;font-weight:500;line-height:1.05;
+  font-variant-numeric:tabular-nums;color:var(--on-lit)}
+.readout .v.word{font-family:var(--sans);font-size:18px;font-weight:700;font-stretch:110%;
+  color:var(--on-lit)}
+.readout .v .u{font-size:12px;opacity:.58;margin-left:2px}
+.readout .k{font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  opacity:.56;margin-top:6px}
+
+/* ---------- cook ---------------------------------------------------------- */
+.tray{font-size:16px;line-height:1.55;color:var(--ink-2);
+  background:var(--sunk);border-radius:var(--r-sm);padding:14px 16px;margin-top:var(--s4)}
+.steps{display:flex;flex-direction:column;gap:15px;counter-reset:s;margin-top:var(--s4)}
+.steps li{display:grid;grid-template-columns:24px 1fr;gap:12px;align-items:start}
+.steps li::before{counter-increment:s;content:counter(s,decimal-leading-zero);font-family:var(--mono);
+  font-size:12.5px;color:var(--ember-ink);font-weight:500;padding-top:3px}
+.steps li p{font-size:15.5px;line-height:1.45;color:var(--ink-2)}
+.steps li b{color:var(--ink);font-weight:600}
+
+/* the tick beside a cold row: a well, and the family's deep tone when checked, the one fill
+   that takes the mark. A tick tracks progress and moves no stock, and the card says so. */
+.tick{appearance:none;-webkit-appearance:none;width:26px;height:26px;flex:none;border-radius:var(--r-xs);
+  background:var(--sunk);cursor:pointer;position:relative;margin:0;
+  transition:background-color var(--d-state) var(--ez),transform var(--d-press) var(--ez)}
+.tick:checked{background:var(--deep,var(--frost-deep))}
+.tick:active{transform:scale(.9)}
+.tick:checked::after{content:"";position:absolute;left:9px;top:4px;width:6px;height:12px;
+  border:solid var(--on-deep);border-width:0 2px 2px 0;transform:rotate(42deg)}
+.tick~.row__body{cursor:pointer}
+/* where a tick means done (a slot eaten, a pantry item owned) the title recedes; where it
+   means in play (a store) nothing does */
+.tick--done:checked~.row__body .row__title{color:var(--ink-3)}
+
+
+/* ---------- the gate rail: one segment per unit of stock standing between a lab result and
+   the slot it wants to change, in the family core; a segment goes when that stock does ---- */
+.gate{margin-top:var(--s4)}
+.gaterail{display:flex;gap:3px;height:10px}
+.gaterail i{flex:1;background:var(--core,var(--plum));border-radius:2px;
+  transition:background-color var(--d-hero) var(--ez),transform var(--d-hero) var(--ez);transform-origin:bottom}
+.gaterail i.gone{background:color-mix(in srgb,var(--core,var(--plum)) 18%, transparent);transform:scaleY(.45)}
+.gatecap{display:flex;justify-content:space-between;margin-top:9px;font-family:var(--mono);
+  font-size:11px;letter-spacing:.05em;color:var(--fam-ink,var(--ink-3));text-transform:uppercase}
+
+
+/* ---------- controls ------------------------------------------------------ */
+.actions{display:flex;flex-direction:column;gap:10px}
+/* BUTTON — a pill. The default is a well; ink is the commitment on a white or lit card;
+   solid is the family's deep tone with white text, the raised action, heat and only heat. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:var(--s2);min-height:46px;
+  padding:0 var(--s5);border-radius:var(--r-pill);font-weight:640;font-size:15px;letter-spacing:-.01em;
+  background:var(--sunk);color:var(--ink);
+  transition:transform var(--d-press) var(--ez),box-shadow var(--d-press) var(--ez),background-color var(--d-state) var(--ez)}
+.btn--solid{background:var(--deep);color:var(--on-deep);box-shadow:0 2px 8px color-mix(in srgb,var(--deep) 34%, transparent)}
+.btn--ink{background:var(--ink);color:var(--enamel)}
+.btn--quiet{background:transparent;color:var(--fam-ink,var(--ink-2));padding:0 var(--s3);min-height:38px}
+.btn--sm{min-height:34px;padding:0 var(--s4);font-size:13px}
+.btn:active,.btn.pressed{transform:scale(.962);box-shadow:0 1px 3px rgba(18,21,14,.10)}
+.btn svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.9;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.btn[disabled]{opacity:.45;cursor:default;box-shadow:none}
+.iconbtn{width:38px;height:38px;border-radius:var(--r-pill);background:var(--surface);color:var(--ink-2);
+  display:grid;place-items:center;box-shadow:var(--lift-1);flex:none;transition:transform var(--d-press) var(--ez)}
+.iconbtn:active{transform:scale(.9)}
+.iconbtn svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.8;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.iconbtn--onlit{background:rgba(255,255,255,.5);color:var(--on-lit);box-shadow:none}
+
+/* the one daily button: ember's deep tone, and the only white text on Tonight */
+.btn-eat{background:linear-gradient(180deg,var(--ember-deep),var(--ember-ink));color:var(--on-deep);
+  font-size:18px;font-weight:700;min-height:60px;position:relative;overflow:hidden;
+  box-shadow:0 4px 16px color-mix(in srgb,var(--ember-deep) 38%, transparent)}
+.btnrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btnrow .btn{min-height:44px;font-size:14px;padding:0 var(--s3)}
+
+/* ---------- THE SETTLE: the log moment. The fire canvas and the words that ride over it
+   are the page's own, because they fill the viewport; this is the hero settling under them. */
+.settling .mealname{animation:readin .66s var(--ez) both}
+.settling .mealsub{animation:readin .66s var(--ez) .06s both}
+.settling .readout{animation:readin .66s var(--ez) .12s both}
+@keyframes readin{from{opacity:0;transform:translateY(24px)}}
+
+/* a card that arrives after the action: the one-time note, a trade's undo line */
+.arrive{animation:slidein var(--d-enter) var(--ez-out) both}
+@keyframes slidein{from{opacity:0;transform:translateY(-10px)}}
+
+/* ---------- rows that open in place (the rotation, the markers) ------------ */
+.exp{border-top:1px solid var(--hair)}
+.exp:first-child{border-top:0}
+.chev{width:11px;height:11px;border-right:2px solid var(--ink-3);border-bottom:2px solid var(--ink-3);
+  transform:rotate(45deg);transition:transform .28s var(--ez);margin-right:4px;flex:none}
+.exp.open .chev{transform:rotate(-135deg)}
+.exp-b{display:grid;grid-template-rows:0fr;transition:grid-template-rows .34s var(--ez)}
+.exp.open .exp-b{grid-template-rows:1fr}
+.exp-b>div{overflow:hidden}
+.exp-in{padding:2px 0 18px}
+
+/* ---------- the rotation: rows that open in place, a well of readings, the facts ---------- */
+.rows{margin-top:var(--s2)}
+/* a rotation row's meta carries the meal number and the oven settings, so it wraps rather than
+   losing the minutes to an ellipsis when a pill sits beside it; a marker's name wraps for the
+   same reason, because "Triglyceride:HDL ratio (mmol/L)" cut short is a different marker */
+.rows .row__meta,.rows .row__title{white-space:normal;text-overflow:clip;overflow-wrap:anywhere}
+.rot__in{padding:2px 0 var(--s4)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s3);background:var(--sunk);
+  border-radius:var(--r-md);padding:var(--s3) var(--s4)}
+.stats--2{grid-template-columns:1fr 1fr;gap:var(--s4) var(--s3)}
+.facts{display:grid;grid-template-columns:80px 1fr;gap:7px var(--s3);margin:var(--s4) 0 0}
+.facts dt{font-size:11px;line-height:1;font-weight:680;letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);padding-top:4px}
+.facts dd{margin:0;font-size:14.5px;line-height:1.42;color:var(--ink-2)}
+.facts b{color:var(--ink);font-weight:600}
+.rot__in .btn--ink{width:100%;margin-top:var(--s4)}
+
+
+/* the undo line: a trade is reversible and says so in place, in the cold family's wash */
+.undoline{display:flex;align-items:center;gap:var(--s3);justify-content:space-between;
+  background:var(--wash,var(--frost-wash));border-radius:var(--r-sm);padding:var(--s3) var(--s4)}
+.undoline span{font-size:13.5px;line-height:1.4;color:var(--ink-2)}
+
+/* the hero answers the log: a punch on the commitment curve */
+.punch{animation:punch .42s var(--ez-spring)}
+@keyframes punch{0%{transform:scale(1)}38%{transform:scale(.955)}100%{transform:scale(1)}}
+
+/* ---------- the one nav --------------------------------------------------- */
+.nav{display:grid;grid-template-columns:repeat(4,1fr);background:var(--surface);
+  border-top:1px solid var(--hair);padding-bottom:env(safe-area-inset-bottom);
+  box-shadow:0 -1px 14px rgba(14,20,22,.06)}
+.nav button{height:var(--navh);display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:5px;color:var(--ink-3);font-size:11px;font-weight:600;letter-spacing:.01em;
+  transition:color .18s var(--ez)}
+.nav button .gl{width:20px;height:20px;stroke:currentColor;fill:none;stroke-width:1.7;
+  transition:stroke .18s var(--ez),transform .26s var(--ez)}
+.nav button[aria-current="page"]{color:var(--ink)}
+.nav button[aria-current="page"] .gl{stroke:var(--ember);transform:translateY(-1px) scale(1.06)}
+
+
+/* ==========================================================================
+   ONE APP. The Mac is the same page with more room, not a different app.
+   Everything below is what the big screen used to keep to itself: the full
+   chart, the tables, the forms. They are the same components at both sizes.
+   ========================================================================== */
+
+/* ---------- the chart. The line is ink, because ink is data. The researched target is a
+   band in the markers family's lit tone; the lab's own printed range is a dashed line beneath
+   it, never a colour of its own, because it is the lab's word not this app's. Out of target
+   is a triangle in ember: a state, the same one the pill shows. ------------------------ */
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+svg.chart text{font-family:var(--mono);font-size:11px;fill:var(--ink-3);letter-spacing:.04em}
+svg.chart text.val{font-size:13px;fill:var(--ink);font-weight:500;letter-spacing:0}
+svg.chart text.ok{fill:var(--fam-ink,var(--plum-ink))}
+.c-line{fill:none;stroke:var(--ink);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.c-grid{stroke:var(--hair);stroke-dasharray:1 4;shape-rendering:crispEdges}
+.c-frame{stroke:var(--ink-3);stroke-opacity:.55;shape-rendering:crispEdges}
+.c-edge{stroke:var(--hair);shape-rendering:crispEdges}
+.c-band{fill:var(--lit,var(--plum-lit));opacity:.32}
+.c-bandedge{stroke:var(--core,var(--plum));shape-rendering:crispEdges}
+.c-lab{stroke:var(--ink-3);stroke-dasharray:5 4;fill:none;shape-rendering:crispEdges}
+.c-dot{fill:var(--surface);stroke:var(--ink);stroke-width:1.8}
+.c-dot.last{fill:var(--ink)}
+.c-out{fill:var(--ember)}
+.c-rug{stroke:var(--ink-3);stroke-opacity:.55;shape-rendering:crispEdges}
+.c-lattice{stroke:var(--hair);stroke-width:1;shape-rendering:crispEdges}
+.c-cross{stroke:var(--ink-3);shape-rendering:crispEdges}
+.c-hit{fill:transparent;cursor:crosshair}
+.c-hit:focus-visible{outline:2px solid var(--ember);outline-offset:0;border-radius:0}
+.c-hit:focus-visible + .c-halo{stroke:var(--ink);stroke-width:2;fill:none}
+.c-read{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:baseline;margin-top:12px;min-height:22px;
+  font-size:14px;color:var(--ink-2)}
+.c-read .mono{font-family:var(--mono);font-size:12px;color:var(--ink-3)}
+.c-read .val{font-family:var(--mono);font-size:16px;font-weight:500;color:var(--ink)}
+.c-read .st{display:inline-flex;align-items:center;gap:7px}
+.c-read .i.up{transform:rotate(-90deg)}
+.c-read .i.dn{transform:rotate(90deg)}
+.c-key{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:12.5px;color:var(--ink-3)}
+.c-key span{display:inline-flex;align-items:center;gap:7px}
+.mark{display:inline-block;width:9px;height:9px;flex:none}
+.mark.out{background:var(--ember);clip-path:polygon(50% 0,100% 100%,0 100%)}
+.mark.low{background:var(--frost);clip-path:polygon(50% 100%,100% 0,0 0)}
+.mark.in{border:1.5px solid var(--core,var(--plum));background:none;border-radius:50%}
+.mark.none{height:0;border-top:1.5px solid var(--ink-3)}
+
+/* ---------- tables: rules and alignment, no zebra, no vertical borders ---------------- */
+.scroll-x{overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 calc(-1 * var(--s5));padding:0 var(--s5)}
+table.data{border-collapse:collapse;width:100%;font-size:14px}
+table.data th{font-family:var(--mono);font-weight:500;font-size:10.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3);text-align:left;padding:8px 10px;
+  border-bottom:1px solid var(--hair);white-space:nowrap}
+table.data td{padding:10px 10px;border-bottom:1px solid var(--hair);color:var(--ink-2);vertical-align:top;
+  line-height:1.4}
+table.data th:first-child,table.data td:first-child{padding-left:0}
+table.data th:last-child,table.data td:last-child{padding-right:0}
+table.data td.n,table.data th.n{text-align:right;font-family:var(--mono);
+  font-variant-numeric:tabular-nums;color:var(--ink);white-space:nowrap}
+table.data tr.excl td{color:var(--ink-3)}
+table.data td.wrap{white-space:normal;min-width:180px}
+/* .pill is a component now (above); .pill.hot and .pill.ok are restated there */
+.strike{text-decoration:line-through}
+
+/* ---------- the counter on the ingest preview: the two states that need a decision sit
+   above the three that do not, and nothing is told apart by hue alone ------------------ */
+.ctr{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+.ctr-g{display:grid;gap:1px;background:var(--hair);border-radius:12px;overflow:hidden}
+.ctr-c{background:var(--surface);padding:11px 13px;display:flex;justify-content:space-between;
+  align-items:baseline;gap:8px}
+.ctr-c .k{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.ctr-c .v{font-family:var(--mono);font-size:22px;font-weight:500;color:var(--ink-3)}
+.ctr-c.on .v{color:var(--ink)}
+.ctr-c.need .k,.ctr-c.need .v{color:var(--ember-ink)}
+.callout{border-radius:var(--r-sm);padding:var(--s3) var(--s4);font-size:14.5px;line-height:1.5;margin:var(--s3) 0;
+  background:var(--sunk);color:var(--ink-2)}
+.callout.warn{background:var(--ember-wash);color:var(--ember-ink)}
+.callout.good{background:var(--sprout-wash);color:var(--sprout-ink)}
+
+/* ---------- forms: a field is a label over a well, and a well is 44px with no border. The
+   buttons beside them are the pill: ink for the one commitment, the well for the rest. ---- */
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.field>span{font-size:11px;line-height:1;font-weight:680;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.field input,.field select,.field textarea{border:0;border-radius:var(--r-sm);padding:11px 13px;font:inherit;
+  font-size:15px;background:var(--sunk);color:var(--ink);min-height:44px;width:100%}
+.field input:focus,.field select:focus{outline:2px solid var(--ember);outline-offset:1px}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.formgrid .wide{grid-column:1/-1}
+@media (max-width:520px){.formgrid{grid-template-columns:1fr}}
+.inline{display:flex;gap:9px;align-items:end;flex-wrap:wrap}
+.inline .field{flex:1;min-width:140px}
+.inline .btn,.formgrid .btn{min-height:44px}
+.filepick{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.filepick input[type=file]{font-size:14px;color:var(--ink-2);max-width:100%}
+.code{font-family:var(--mono);font-size:13px;background:var(--sunk);border-radius:var(--r-xs);padding:10px 12px;
+  word-break:break-all;color:var(--ink);user-select:all;-webkit-user-select:all;line-height:1.5}
+
+/* ---------- the column. One width for the phone; the wide rule below widens it. The page
+   must not set this itself: same specificity, later in the cascade, and the wide rule would
+   never win, which is exactly what happened the first time. ---------------------------- */
+#app{max-width:520px}
+.nav,.statusline,.mast{max-width:520px}
+
+/* ---------- wide: the Mac gets room, not a different app ------------------------------ */
+@media (min-width:900px){
+  #app{max-width:1040px}
+  .nav,.statusline,.mast{max-width:1040px}
+  .mast-r{padding:0 44px}
+  .stack{grid-template-columns:2fr 3fr;grid-template-rows:auto 1fr;grid-template-areas:"hero main" "aside main";
+    align-items:start;padding:16px 24px 28px}
+  .stack--top{grid-template-columns:1fr 1fr;grid-template-rows:auto auto;grid-template-areas:"hero hero" "main aside"}
+  .chips{padding:16px 24px 0}
+}
+</style>
+
+<style>
+/* The app is the whole viewport. One document, one scroll, one navigation bar.
+   The Plate used to be a 2163px page inside a position:fixed 756px iframe on the phone
+   shell, which is why the first touch was swallowed and scrolling stalled for a second or
+   two before it caught. There is no iframe now, and nothing nests a scroll inside a scroll. */
+body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-inset-bottom))}
+#app{width:100%;margin:0 auto}
+
+/* the bar is pinned to the viewport, and its safe-area strip is painted its own colour —
+   the previous one left 34px of a different surface sitting under the tabs */
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:40;margin:0 auto}
+
+/* the fire fills the viewport, above the page and below nothing */
+#fire{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:0;
+  transition:opacity .5s var(--ez);mix-blend-mode:screen}
+#fire.on{opacity:1}
+#bloomtxt{position:fixed;inset:0;z-index:61;display:none;flex-direction:column;align-items:center;
+  justify-content:center;gap:10px;pointer-events:none;text-align:center;padding:0 34px}
+#bloomtxt.go{display:flex}
+#bloomtxt .big{font-size:clamp(30px,9vw,42px);font-weight:800;font-stretch:118%;letter-spacing:-.03em;
+  color:#FFF7F2;animation:bt 1.4s var(--ez) both;text-shadow:0 2px 30px rgba(0,0,0,.4)}
+#bloomtxt .sm{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
+  color:rgba(255,247,242,.76);animation:bt 1.4s var(--ez) .1s both}
+@keyframes bt{0%{opacity:0;transform:translateY(20px) scale(.94)}
+  16%{opacity:1;transform:none}70%{opacity:1}100%{opacity:0;transform:translateY(-10px)}}
+
+.mast{position:fixed;top:0;left:0;right:0;z-index:45;margin:0 auto;color:var(--ink);
+  background:color-mix(in srgb,var(--enamel) 86%, transparent);
+  backdrop-filter:blur(14px) saturate(1.6);padding-top:env(safe-area-inset-top)}
+.mast-r{height:var(--masth);display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:0 22px;font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase}
+.mast .brand{font-family:var(--sans);font-weight:800;letter-spacing:.2em;font-size:11.5px}
+.mast .folio{color:var(--ink-3)}
+/* the theme toggle is a sunk pill, the system's button at rest; nothing here has a border */
+.mast .tog{background:var(--sunk);border-radius:var(--r-pill);padding:6px 11px;color:var(--ink-2);
+  font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
+  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
+#app{padding-top:calc(var(--masth) + env(safe-area-inset-top))}
+/* the stepper beside a stock row, and the slot stepper beside a cold row: round wells, the
+   system's iconbtn without the lift */
+.step2{display:inline-flex;gap:6px;flex:none}
+.step2 .iconbtn{background:var(--sunk);box-shadow:none;color:var(--ink);-webkit-tap-highlight-color:transparent}
+.step2 .iconbtn.pressed{transform:scale(.9)}
+/* the ingest preview: a row is a keep tick, a button that opens the row to its fields, and a
+   pill; a row left out recedes, the way a slot eaten does */
+.ingrow .row__body{background:none;border:0;padding:0;margin:0;font:inherit;color:inherit;text-align:left;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ingrow .row__meta{white-space:normal;overflow-wrap:anywhere}
+.tick--keep:not(:checked)~.row__body{opacity:.45}
+.i{width:16px;height:16px;display:inline-block;fill:none;stroke:currentColor;stroke-width:1.6;
+  stroke-linecap:round;stroke-linejoin:round}
+.cap{font-family:var(--mono);font-size:11px;line-height:1.55;color:var(--ink-3);letter-spacing:.02em}
+.cap b{color:var(--ink-2);font-weight:500}
+.sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);
+  clip-path:inset(50%);white-space:nowrap;border:0}
+.statusline{position:fixed;left:0;right:0;bottom:calc(var(--navh) + env(safe-area-inset-bottom));z-index:39;
+  min-height:28px;display:flex;align-items:center;padding:5px 20px;margin:0 auto;
+  background:var(--ink);color:var(--enamel);font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.11em;text-transform:uppercase;opacity:0;transform:translateY(6px);pointer-events:none;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  transition:opacity .2s var(--ez),transform .2s var(--ez)}
+.statusline.on{opacity:1;transform:none}
+.pressed{transform:scale(.985)}
+</style>
+
+<script>
+/* Light is the identity, not a default that happens to load first. Dark is a choice and is
+   designed quieter, because he has said dark mode hurts his eyes. */
+(function(){
+  const K='lt:theme';
+  function paint(t){
+    const dark=t==='dark';
+    document.documentElement.dataset.theme=dark?'dark':'light';
+    const m=document.querySelector('meta[name=theme-color]');
+    if(m)m.content=dark?'#101415':'#F1F3F2';
+  }
+  /* A saved preference is honoured only if this design's own toggle wrote it. The previous
+     page also used this key, and a dark choice made there under a different palette should
+     not follow him here uninvited; light is the identity. */
+  let saved=null; try{ if(localStorage.getItem('lt:themev')==='2') saved=localStorage.getItem(K); }catch(e){}
+  paint(saved || 'light');
+  window.plateTheme=function(){
+    const now=document.documentElement.dataset.theme==='dark'?'light':'dark';
+    try{localStorage.setItem(K,now);localStorage.setItem('lt:themev','2');}catch(e){}
+    paint(now);
+  };
+  window.addEventListener('storage',e=>{if(e.key===K)paint(e.newValue||'light');});
+})();
+</script>
+</head>
+<body>
+<!-- VERNIER icon set. Twelve marks, one hand: 16x16 box, 12px live area, 1.5px stroke, butt
+     caps, mitred joins, geometry on a whole-pixel sub-grid. Inlined once per page as a hidden
+     sprite, so there is no request, no icon webfont, and it works with no signal. Every use is
+     aria-hidden and always has a word beside it: no icon here is the only carrier of meaning.
+     These replace the emoji the pages used to print (a cube, a tick, a sun, a moon, a
+     refresh glyph), which iOS renders in its own colour style, on its own baseline, at a
+     weight that matches nothing else on the screen. -->
+<svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+ <defs>
+  <!-- something to move to the fridge: a drafted six-point flake, not a cartoon ice cube -->
+  <symbol id="i-frost" viewBox="0 0 16 16">
+   <path d="M2 8H14M5 2.8L11 13.2M5 13.2L11 2.8"/>
+   <path d="M14 8l-1.56-1.56M14 8l-1.56 1.56M2 8l1.56-1.56M2 8l1.56 1.56"/>
+   <path d="M11 2.8l-2.13.57M11 2.8l.57 2.13M5 13.2l2.13-.57M5 13.2l-.57-2.13"/>
+   <path d="M5 2.8l-.57 2.13M5 2.8l2.13.57M11 13.2l.57-2.13M11 13.2l-2.13-.57"/>
+  </symbol>
+  <!-- done. Heavier than the set default so it matches the box rule it sits inside. -->
+  <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.4L6.5 11.4L12.6 4.8" stroke-width="2"/></symbol>
+  <!-- light or dark: a printer's tint chip, the same control in the same corner everywhere -->
+  <symbol id="i-tint" viewBox="0 0 16 16">
+   <circle cx="8" cy="8" r="5.6"/>
+   <path d="M8 2.4A5.6 5.6 0 0 0 8 13.6Z" fill="currentColor" stroke="none"/>
+  </symbol>
+  <!-- change this one slot: a proofreader's revise mark, not a refresh spinner -->
+  <symbol id="i-cycle" viewBox="0 0 16 16">
+   <path d="M9.88 2.83A5.5 5.5 0 1 1 2.58 7.04"/>
+   <path d="M9.88 2.83l-1.72-2.45M9.88 2.83l-2.9.78"/>
+  </symbol>
+  <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3V13M3 8H13"/></symbol>
+  <symbol id="i-minus" viewBox="0 0 16 16"><path d="M3 8H13"/></symbol>
+  <!-- becomes: the swap headline, the rotation list, and (rotated) every disclosure -->
+  <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M2.5 8H13.5M13.5 8l-3.5-3.5M13.5 8l-3.5 3.5"/></symbol>
+  <!-- needs a decision. Carries the same triangle as the out-of-target mark. -->
+  <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.2L14.6 13.6H1.4Z"/><path d="M8 6.4v3.4M8 11.4v.9"/></symbol>
+  <!-- the errand: a shopping bag, handles up. A store's tile on Kitchen, and the one run
+       that is due. -->
+  <symbol id="i-bag" viewBox="0 0 16 16"><path d="M3.5 5.5H12.5L11.8 13.5H4.2Z"/><path d="M5.8 5.5V4.3A2.2 2.2 0 0 1 10.2 4.3V5.5"/></symbol>
+  <!-- the fridge and the pantry: a door with a shelf, and a jar. Zone tiles on Kitchen. -->
+  <symbol id="i-fridge" viewBox="0 0 16 16"><path d="M3.5 2.5H12.5V13.5H3.5Z"/><path d="M3.5 7H12.5"/><path d="M6 4.5V5.5M6 9V10.5"/></symbol>
+  <symbol id="i-jar" viewBox="0 0 16 16"><path d="M5 2.5H11V4.5H5Z"/><path d="M4.5 4.5H11.5C12.2 5.6 12.5 6.6 12.5 8V12.4A1.1 1.1 0 0 1 11.4 13.5H4.6A1.1 1.1 0 0 1 3.5 12.4V8C3.5 6.6 3.8 5.6 4.5 4.5Z"/></symbol>
+  <!-- a marker: the trend line the Markers tab is drawn on, and its chip on the one card
+       that is the point of that screen -->
+  <symbol id="i-marker" viewBox="0 0 16 16"><path d="M2 12.5L5.6 8L8.2 10.6L13.5 4.5"/><path d="M10.6 4.5H13.5V7.4"/></symbol>
+ </defs>
+</svg>
+
+<canvas id="fire" aria-hidden="true"></canvas>
+<div id="bloomtxt" aria-hidden="true"><div class="big" id="bloomBig"></div><div class="sm" id="bloomSm"></div></div>
+<header class="mast" id="mast" aria-label="Plate"></header>
+<main id="app"></main>
+<nav class="nav" id="nav" aria-label="Plate"></nav>
+<div id="say" class="sr" role="status" aria-live="polite"></div>
+<div id="statusline" class="statusline" aria-hidden="true"></div>
+<div id="gate"></div>
+<script type="module" src="plate/boot.js"></script>
+</body>
+</html>
