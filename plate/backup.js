@@ -89,7 +89,11 @@ export function readBackup(bytes) {
 
 /* the whole home as one container */
 export function backupFromHome(home) {
-  return buildBackup(home.paths().map(path => ({ path, bytes: home.readBytes(path) })));
+  /* the same leavings as web.backup_files: the spike's output, the golden values, a home
+     nested inside this one, dotfiles, logs and earlier backups of this kind */
+  const skip = p => p.startsWith('labs/spike/') || p.startsWith('labs/golden/') || /^labs\/[^/]+\/(config|labs)\//.test(p)
+    || p.split('/').some(s => s.startsWith('.')) || /\.(log|plate|tmp)$/i.test(p);
+  return buildBackup(home.paths().filter(p => !skip(p)).map(path => ({ path, bytes: home.readBytes(path) })));
 }
 
 /* every file of the container written into the home, bytes as Uint8Array; returns the paths
