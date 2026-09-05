@@ -592,6 +592,10 @@ table.data td.wrap{white-space:normal;min-width:180px}
 .field input,.field select,.field textarea{border:0;border-radius:var(--r-sm);padding:11px 13px;font:inherit;
   font-size:15px;background:var(--sunk);color:var(--ink);min-height:44px;width:100%}
 .field input:focus,.field select:focus{outline:2px solid var(--ember);outline-offset:1px}
+/* a date is the phone's own control, made to sit in the well like every other field: Safari on
+   iOS otherwise ignores the width and centres the value */
+.field input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;box-sizing:border-box;text-align:left}
+.field input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
 .formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .formgrid .wide{grid-column:1/-1}
 @media (max-width:520px){.formgrid{grid-template-columns:1fr}}

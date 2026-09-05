@@ -77,6 +77,8 @@ const PORTIONS=CFG.portions||1;
 const PLATE=CFG.plate||1;
 const plateWord=()=>PLATE===1?'':'plates about '+Math.round(Math.abs(1-PLATE)*100)+' percent '+(PLATE<1?'smaller':'larger')+' than written';
 const cookingFor=n=>(n||1)>1?'cooking for '+fmt(n):'';
+/* a cooking time as the readout prints it: minutes, or hours once it is a slow cooker's afternoon */
+const timeParts=n=>n>=120?[String(Math.round(n/30)/2),'h']:[String(n),'min'];
 const peopleWord=n=>fmt(n)+' '+(n===1?'person':'people');
 const fmt=n=>Number.isInteger(n)?String(n):String(Math.round(n*100)/100);
 /* "each" is a unit in the catalog and not a word anybody says out loud, so a countable item
@@ -1101,7 +1103,7 @@ function viewTonight(F){
       (kit?', with '+esc(kit.name.toLowerCase()):'')+'</p>'+
     '<div class="readout">'+
       '<div><div class="v">'+(m.temp_f==null?'—':m.temp_f)+(m.temp_f==null?'':'<span class="u">°F</span>')+'</div><div class="k">Temp</div></div>'+
-      '<div><div class="v">'+(m.equipment?m.minutes:'—')+'<span class="u">min</span></div><div class="k">Time</div></div>'+
+      '<div><div class="v">'+(m.equipment?timeParts(m.minutes)[0]:'—')+'<span class="u">'+(m.equipment?timeParts(m.minutes)[1]:'min')+'</span></div><div class="k">Time</div></div>'+
       '<div><div class="v word">'+esc(m.mode)+'</div><div class="k">Mode</div></div>'+
     '</div>'+(m.why_not?'<p class="mealsub">Not for this kitchen as written: '+esc(m.why_not)+'.</p>':'')+
     (m.excluded&&m.excluded.length?'<p class="mealsub">'+esc(notOn(m))+' It stays until the stock it was eating is gone.</p>':'')+
@@ -1232,7 +1234,7 @@ function rotRow(F,i){
   const changed=was&&was.id!==x.id, sw=changed?SWAPS.find(s=>s.from===was.id&&s.to===x.id):null;
   const pend=changed?[]:SWAPS.filter(s=>s.from===x.id&&S.pending[s.key]>0);
   const open=OPEN==='r'+i, ct=coldTot(i,ROT), n=S.cursor+1+i;
-  const meta='Meal '+n+(protWord(x)?' · '+esc(protWord(x)):'')+' · '+(x.equipment?esc(x.mode||'')+(x.temp_f!=null?' '+x.temp_f+'°':'')+' · '+x.minutes+' min':'not for this kitchen');
+  const meta='Meal '+n+(protWord(x)?' · '+esc(protWord(x)):'')+' · '+(x.equipment?esc(x.mode||'')+(x.temp_f!=null?' '+x.temp_f+'°':'')+' · '+timeParts(x.minutes).join(' '):'not for this kitchen');
   let note='';
   if(changed)note='Was '+was.name+'. The '+((sw&&(sw.gate_name||sw.gate_item))||'stock')+' runs out before this, so your labs take the slot.';
   else if(pend.length)note='Becomes '+pend[0].to_name+' once the '+(pend[0].gate_name||pend[0].gate_item)+' is gone.';
@@ -1253,7 +1255,7 @@ function rotRow(F,i){
     '<div class="exp-b"><div><div class="rot__in">'+
       '<div class="stats">'+
         '<div class="stat"><span class="t-label">Temp</span><span class="numrow"><b class="num num--md">'+(x.temp_f==null?'—':x.temp_f)+'</b>'+(x.temp_f==null?'':'<span class="t-unit">°F</span>')+'</span></div>'+
-        '<div class="stat"><span class="t-label">Time</span><span class="numrow"><b class="num num--md">'+(x.equipment?x.minutes:'—')+'</b><span class="t-unit">min</span></span></div>'+
+        '<div class="stat"><span class="t-label">Time</span><span class="numrow"><b class="num num--md">'+(x.equipment?timeParts(x.minutes)[0]:'—')+'</b><span class="t-unit">'+(x.equipment?timeParts(x.minutes)[1]:'min')+'</span></span></div>'+
         '<div class="stat"><span class="t-label">Mode</span><span class="numrow"><b class="num num--md word">'+esc(x.mode||'—')+'</b></span></div>'+
       '</div><dl class="facts">'+
         (xk?'<dt>Flavour</dt><dd><b>'+esc(xk.name)+'.</b> '+esc(xk.instruction)+'</dd>':'')+
