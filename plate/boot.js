@@ -10,7 +10,7 @@
    person leaves the device. */
 import { loadHome, flush, persist } from './fs.js';
 import { DEFAULTS, SHIPPED, PERSONAL, LINEAGE } from './defaults.js';
-import { syncSeeds } from './seeds.js';
+import { syncCatalog } from './seeds.js';
 import { BUILD } from './build.js';
 import { installApi } from './api.js';
 import { payloadBuilt, getState, setState, recordEvents } from './plate.js';
@@ -51,11 +51,18 @@ function loadScript(src) {
      and a shipped file this home was born with and never changed caught up with this build;
      anything the person changed is theirs and stays (his phone kept the seed it was born with
      through three builds and a Start over before this) */
-  const { seeded, refreshed } = syncSeeds(home, DEFAULTS, typeof LINEAGE === 'object' && LINEAGE ? LINEAGE : {}, SHIPPED, PERSONAL);
+  const { seeded, refreshed, added, kept } = syncCatalog(home, DEFAULTS, typeof LINEAGE === 'object' && LINEAGE ? LINEAGE : {}, SHIPPED, PERSONAL, (h) => payloadBuilt(h));
   if (home.dirty.size) await flush(home);
   persist().catch(() => {});
+  /* a refresh this build could not make is said once per build, not on every open */
+  let keptBefore = false;
+  if (kept) {
+    const k = 'lt:seeds:held', v = BUILD.version + '|' + kept;
+    try { keptBefore = localStorage.getItem(k) === v; localStorage.setItem(k, v); } catch (e) {}
+  }
 
-  const local = { version: BUILD.version, pdfjs: BUILD.pdfjs, files: home.paths().length, firstRun: seeded.length > 0 && !home.exists('labs/results.csv'), refreshed };
+  const local = { version: BUILD.version, pdfjs: BUILD.pdfjs, files: home.paths().length, firstRun: seeded.length > 0 && !home.exists('labs/results.csv'),
+                  refreshed, added, kept, keptBefore };
   window.PLATE_LOCAL = local;
 
   /* the same rule the server enforced: a copy of the state is stored only when it beats the

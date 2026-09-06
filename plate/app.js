@@ -3071,8 +3071,16 @@ document.addEventListener('lt:remote',e=>{
       if(Object.keys(got).length){S.tally=got;persist();render();}}).catch(e=>{console.warn('passport: '+(e&&e.message||e));});}
   /* the Profile view draws once its data arrives, so the render that draws the editor scrolls */
   if(back&&S.init){SCROLLTO=back.at||null;if((tab==='markers'||tab==='you')&&MK===null)loadMarkers();}
-  /* the device caught a seeded file up with this build: say which, in food words, once */
+  /* the device caught a seeded file up with this build: say which, in food words, once; and
+     when the catalog could not be brought up to date without breaking the home, say that once
+     per build and leave the home as it was */
   const L0=window.PLATE_LOCAL;
-  if(L0&&Array.isArray(L0.refreshed)&&L0.refreshed.length&&S.init)say('This build refreshed '+list([...new Set(L0.refreshed.map(n=>SEEDWORD[n]||n))])+'.');
+  if(L0&&S.init){
+    const parts=[];
+    if(Array.isArray(L0.refreshed)&&L0.refreshed.length)parts.push('refreshed '+list([...new Set(L0.refreshed.map(n=>SEEDWORD[n]||n))]));
+    if(Array.isArray(L0.added)&&L0.added.length)parts.push('added the packs for '+L0.added.length+' new item'+(L0.added.length===1?'':'s')+' to what your stores carry');
+    if(parts.length)say('This build '+parts.join(', and ')+'.');
+    else if(L0.kept&&!L0.keptBefore)say('This build could not bring the catalog on this device up to date, so it stays as it was: '+L0.kept);
+  }
 })();
 
