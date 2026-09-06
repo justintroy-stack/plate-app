@@ -348,6 +348,24 @@ function extraOptions(){
   SLOTS.forEach(sl=>(liveOpts(sl)||[]).forEach((o,i)=>out.push({key:sl.id+'/'+i,label:o.label,kcal:o.kcal,protein_g:o.protein_g,uses:o.uses,slot:sl.name})));
   return out;
 }
+/* ---- "Also had", by amount (his ask, 2026-09-06: "whenever it says 3 eggs, I actually eat 4
+   ... I need the ability to add 1 additional egg instead of another 3 eggs"): anything on hand,
+   in the item's own step. The label is the amounts in the block's own words ("1 egg", "0.5 cup
+   2% cottage cheese"); the day is counted from each item's per-unit figures (items.csv, Phase
+   12), and a home whose items carry none counts the amount in stock and not on the day, and
+   says so. Stock is the truth here: what is on hand may have been eaten, whatever the plan
+   thinks of it, the way a cold option the plan left out stays while its stock lasts. */
+const singular=n=>/oes$/.test(n)?n.slice(0,-2):/s$/.test(n)?n.slice(0,-1):n;
+function amtLabel(k,v){const it=I[k];if(!it)return '';const u=it.unit||'',name=it.name.toLowerCase();
+  if(u==='eggs')return fmt(v)+' '+(v===1?'egg':'eggs');
+  if(!u||u==='each'||name.endsWith(' '+u))return fmt(v)+' '+(v===1?singular(name):name);
+  return fmt(v)+' '+unitOf(k,v<=1?1:v)+(u==='cans'&&name.startsWith('canned ')?name.slice(7):name);}   /* half a cup, not half a cups */
+function extraFrom(amt){const uses={},parts=[];let kcal=0,pro=0,priced=true;
+  IORDER.forEach(k=>{const v=Number(amt&&amt[k]);if(!(v>0)||!I[k])return;uses[k]=v;parts.push(amtLabel(k,v));
+    const c=I[k].kcal,p=I[k].protein_g;if(c==null||p==null)priced=false;else{kcal+=c*v;pro+=p*v;}});
+  if(!parts.length)return null;
+  return {key:'amt',label:parts.join(', '),kcal:priced?Math.round(kcal):null,protein_g:priced?Math.round(pro):null,uses,slot:'',priced};}
+function extraItems(){return IORDER.filter(k=>(S.inv[k]||0)>0);}
 /* ---- the plan's rule, on the page: what a plan and the chips leave out, and what that costs,
    said before Save. The same three lines as plate_config.leaves_out and the same phrases as
    plan_gaps, pinned equal to the engine by test on every plan and chip combination; the
@@ -374,6 +392,7 @@ function planGaps(reg,avoid){const e=effFor(reg,avoid),out=[],fit=planFit(reg,av
   return out;}
 /* ENGINE-CORE-END */
 let EXTRA=false;                        /* the Also had picker is open */
+let XAMT={};                            /* the amounts set on the Also had picker's by-amount rows, until they are logged or the picker closes */
 let TRIP={};                            /* a trip being planned, per store: the meals it covers */
 
 window.act={
@@ -688,16 +707,22 @@ window.act={
     row, so a card appended under the buttons is below the fold, and a render alone changes
     nothing in the viewport (found on his phone, 2026-09-06: the tap "did nothing") */
  openPartial(){partial=true;pOven=false;EXTRA=false;SCROLLTO='partial-card';render();},
- openExtra(){EXTRA=true;partial=false;SCROLLTO='extra-card';render();say('Pick what you also had.');},
- closeExtra(){EXTRA=false;render();},
+ openExtra(){EXTRA=true;XAMT={};partial=false;SCROLLTO='extra-card';render();say('Pick what you also had.');},
+ closeExtra(){EXTRA=false;XAMT={};render();},
  /* something from stock outside the plan: its own row in the log on no cursor, and the one undo
-    until the next log. The stamp is made here so the undo can name the row it takes out. */
- extra(key){const o=extraOptions().find(x=>x.key===key);if(!o)return;
+    until the next log. The stamp is made here so the undo can name the row it takes out. A
+    canned option and an amount set by hand take the one path, so the row, the undo, the stock
+    and the status line cannot differ. */
+ extra(key){const o=extraOptions().find(x=>x.key===key);if(!o)return;window.act.logExtra(o);},
+ extraAmt(k,d){if(!I[k])return;const cur=XAMT[k]||0,nx=Math.max(0,Math.min(S.inv[k]||0,Math.round((cur+d*stepOf(k))*100)/100));
+   if(nx>0)XAMT[k]=nx;else delete XAMT[k];render();},
+ extraLog(){const o=extraFrom(XAMT);if(!o)return;window.act.logExtra(o);},
+ logExtra(o){
    const at=new Date().toISOString();
    S.last={inv:Object.assign({},S.inv),cursor:S.cursor,checked:S.checked.slice(),order:S.order.slice(),pending:Object.assign({},S.pending),
      gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',at:at};
    if(window.plateEvent)window.plateEvent({cursor:S.cursor,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, beside meal '+(S.cursor+1),at:at});
-   deduct(o.uses);EXTRA=false;persist();render();say('Also had '+o.label+'. Stock updated.');},
+   deduct(o.uses);EXTRA=false;XAMT={};persist();render();say('Also had '+o.label+'. Stock updated.');},
  /* the amount of one item tonight's plate takes: stepped in the item's own step, never below
     nothing, kept until the log that takes it */
  used(k,d){const m=activeMeal();if(USED.cursor!==S.cursor||USED.meal!==m.id)USED={cursor:S.cursor,meal:m.id,amt:{}};
@@ -1557,11 +1582,26 @@ function viewTonight(F){
       (planB?'<button class="btn" data-fk="planb" onclick="act.planB(false)">Back to the planned meal</button>':'')+
       '</div><p class="t-note" style="margin-top:var(--s3)">'+esc(nextGoal(F))+'</p>'+
       '<p class="t-note" style="margin-top:var(--s2)">Ate out? Nothing to log. Tonight\'s plate waits, and a night not logged costs nothing.</p></section>';
-    if(EXTRA)aside+='<section class="card" id="extra-card" data-family="sprout"><span class="t-label">Also had</span>'+
-      '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move. A thing the plan never held has no stock here, so it stays out.</p><div class="rows">'+
+    if(EXTRA){const xo=extraFrom(XAMT), xs=extraItems();
+      aside+='<section class="card" id="extra-card" data-family="sprout"><span class="t-label">Also had</span>'+
+      '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move.</p><div class="rows">'+
       extraOptions().map(o=>'<button class="row" type="button" data-fk="extra:'+esc(o.key)+'" onclick="act.extra(\''+esc(o.key)+'\')"><span class="row__body"><span class="row__title">'+esc(o.label)+'</span>'+
         '<span class="row__meta">'+(o.slot?esc(o.slot)+' · ':'')+Number(o.kcal).toLocaleString()+' kcal · '+o.protein_g+' g protein</span></span>'+icon('arrow')+'</button>').join('')+
-      '</div><div class="btnrow" style="margin-top:var(--s3)"><button class="btn" data-fk="extraback" onclick="act.closeExtra()">Back</button></div></section>';
+      '</div>'+
+      /* by amount: a row per item on hand, a stepper in the item's own step, one log for what
+         was set (his ask: one more egg is one egg, not another three) */
+      '<span class="t-label" style="display:block;margin-top:var(--s5)">Or by amount</span>'+
+      '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Anything on hand, in its own step: one egg, half a cup, a quarter pound. Set what you had, then log it.</p><div class="rows">'+
+      xs.map(k=>{const it=I[k],v=XAMT[k]||0,priced=it.kcal!=null&&it.protein_g!=null,u=it.unit||'';
+        const per=priced?Math.round(it.kcal)+' kcal '+((!u||u==='each')?'each':'per '+unitOf(k,1).trim()):'counted in stock, not on the day';
+        return '<div class="row"><span class="row__body"><span class="row__title">'+esc(it.name)+'</span>'+
+          '<span class="row__meta">'+esc((fmt(S.inv[k])+' '+unitOf(k,S.inv[k])).trim()+' on hand · '+per)+'</span></span>'+
+          '<span class="row__val">'+(v>0?esc(amtLabel(k,v)):'')+'</span>'+
+          '<span class="step2"><button class="iconbtn" type="button" data-fk="xamt-less:'+esc(k)+'" onclick="act.extraAmt(\''+esc(k)+'\',-1)" aria-label="Less '+esc(it.name)+'">'+icon('minus')+'</button>'+
+          '<button class="iconbtn" type="button" data-fk="xamt-more:'+esc(k)+'" onclick="act.extraAmt(\''+esc(k)+'\',1)" aria-label="More '+esc(it.name)+'">'+icon('plus')+'</button></span></div>';}).join('')+
+      '</div>'+(xo?'<p class="t-note" style="margin-top:var(--s3)"><b>'+esc(xo.label)+'.</b> '+(xo.priced?Number(xo.kcal).toLocaleString()+' kcal · '+xo.protein_g+' g protein.':'Counted in stock, not on the day: the items on this home carry no figures.')+'</p>'+
+        '<div class="btnrow" style="margin-top:var(--s2)"><button class="btn btn--ink" type="button" data-fk="xamt-log" onclick="act.extraLog()">Log what you set</button></div>':'')+
+      '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn" data-fk="extraback" onclick="act.closeExtra()">Back</button></div></section>';}
   } else {
     let pc=pOven?m.kcal:0, pp=pOven?m.protein_g:0;
     coldAt(0).forEach(c=>{if(S.checked.includes(c.id)){pc+=c.kcal;pp+=c.protein_g;}});

@@ -571,6 +571,9 @@ export function load(home, opts = {}) {
     items[r.key] = { key: r.key, name: req(r, 'name'), unit: req(r, 'unit'), zone: req(r, 'zone') || 'pantry',
       countdown: lower(get(r, 'countdown', 'yes')) !== 'no', note: get(r, 'note', ''),
       tags: tagsOf(get(r, 'tags', ''), 'items.csv ' + r.key),
+      // per one unit of the item, for something had by amount outside the plan (Phase 12);
+      // a file from before the columns carries null
+      kcal: num(get(r, 'kcal')), protein_g: num(get(r, 'protein_g')), sat_fat_g: num(get(r, 'sat_fat_g')), fiber_g: num(get(r, 'fiber_g')),
       offers: {}, store: '', pack: 0, buy: '' };
     item_order.push(r.key);
   }
