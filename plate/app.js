@@ -271,7 +271,7 @@ let TRIP={};                            /* a trip being planned, per store: the 
 window.act={
  tab(t){if(COMMITTED&&t!==tab){returnTo({tab:t,mk:'overview',at:null});location.reload();return;}
    tab=t;partial=false;EXTRA=false;OPEN=null;TRADED=null;render();if(t==='markers'&&MK===null)loadMarkers();},
- theme(){if(window.plateTheme)window.plateTheme();render();},
+ theme(v){if(window.plateTheme)window.plateTheme(v);render();},
  /* You, from the round control in the masthead: your own settings, food-first. A second tap
     on the control goes back to the tab it was opened from; a card id lands on that card. */
  you(at){if(tab==='you'&&!at){tab=YOUFROM||'tonight';render();return;}
@@ -514,6 +514,16 @@ window.act={
    catch(e){RMSG=e.message;render();}},
  sed(k,v){SED[k]=v;},
  snew(k,v){SNEW[k]=v;},
+ /* a store changed in place under Stores: its name, kind, list line and cadence, by key; the
+    countdown flag rides along unchanged, and the page is fetched again, since the lists and the
+    kind marks are resolved with the catalog */
+ storeEdit(sk){const st=STORES[sk];SEDIT=st?{key:sk,name:st.name,kind:st.kind||'grocery',threshold:String(st.threshold||''),cadence:st.cadence||'',msg:''}:{key:'',name:'',kind:'grocery',threshold:'',cadence:'',msg:''};render();if(st)act.jumpK('stores');},
+ sedit(k,v){SEDIT[k]=v;},
+ async storeSave(){
+   if(!SEDIT.name.trim()){SEDIT.msg='Give the store a name.';render();return;}
+   try{await api('/api/stores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:SEDIT.key,name:SEDIT.name,kind:SEDIT.kind,threshold:SEDIT.threshold,cadence:SEDIT.cadence,countdown:!!(STORES[SEDIT.key]||{}).countdown})});
+     returnTo({at:'stores'});say(SEDIT.name.trim()+' saved.');setTimeout(()=>location.reload(),350);}
+   catch(e){SEDIT.msg=e.message;render();}},
  edItem(k){SED={item:k,store:'',pack:'',buy:'',msg:''};render();},
  edRow(sk){const o=(I[SED.item]&&I[SED.item].offers||{})[sk];if(!o)return;SED.store=sk;SED.pack=String(o.pack);SED.buy=o.buy||'';SED.msg='';render();},
  async saveRow(){
@@ -846,6 +856,7 @@ function ledgerHide(){
   /* the new plate reads in as the sheet goes: the hero flips to it */
   const h=document.getElementById('hero');
   if(h){h.classList.add('settling');h.classList.add('flipin');setTimeout(()=>{h.classList.remove('settling');h.classList.remove('flipin');},1000);}
+  setTimeout(guideRefresh,120);
 }
 function fxSettle(info){
   if(RM.matches||!info)return;
@@ -1940,7 +1951,6 @@ function viewExposure(marker){
 const todayIso=()=>{const d=new Date(),p=n=>String(n).padStart(2,'0');return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
 const ACTWORD={sedentary:'mostly sitting',light:'on your feet part of the day',moderate:'active most days',active:'training hard most days',very_active:'a physical job and training'};
 function targetFrom(e,cal){
-  if(cal&&cal.kcal_from_tracker)return 'From your food tracking app\'s estimate of what you burn, '+Math.round(cal.tracker_expenditure).toLocaleString()+' kcal a day over '+cal.days+' logged days, less your deficit of '+Math.round(cal.deficit)+'.';
   if(e&&e.missing&&!e.missing.length){const h=Math.floor(e.height_in/12),i=fmt(e.height_in-h*12);
     return 'Estimated from your body: '+fmt(e.weight_lb)+' lb, '+h+' ft'+(i!=='0'?' '+i:'')+', '+e.age+', '+(ACTWORD[e.activity]||e.activity)+', '+(e.goal==='hold'?'holding your weight':e.goal==='lose'?'losing '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week':'gaining '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week')+'. Within about 15 percent for any one person; the scale corrects it.';}
   return 'Fill in About you under You, top right, and the estimate appears here.';
@@ -2330,13 +2340,14 @@ function targetLine(){
   const e=TGT.estimate||{}, k=TGT.kcal!=null?TGT.kcal:e.kcal;
   if(e.missing&&e.missing.length)return 'Still needed: '+list(e.missing.map(k=>BODYLABEL[k]||k))+'.';
   let s='About '+k.toLocaleString()+' kcal and '+e.protein_g+' g protein a day'+(e.goal==='hold'?'.':e.goal==='lose'?', to lose '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.':', to gain '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.');
-  if(TGT.measured)s+=' The calories are what your tracking app measured you burn, less that, not a guess from your height and weight.';
-  else if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest this plan goes.';
+  if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest this plan goes.';
   if(e.protein_clamped)s+=' Protein is held to '+e.protein_g+' g, the edge of the band the plan uses.';
   const p=TGT.plate;
   if(p&&p.ratio!=null){const pct=Math.round(Math.abs(1-p.plate)*100), dir=p.plate<1?'smaller':'larger';
     if(p.clamped)s+=' This plan cannot be scaled that far: plates stop at '+pct+' percent '+dir+' than the recipes as written, about '+p.plate_kcal.toLocaleString()+' kcal a day.';
-    else s+=p.plate===1?' Plates as the recipes are written.':' Plates about '+pct+' percent '+dir+' than the recipes as written.';}
+    else s+=p.plate===1?' Plates as the recipes are written.':' Plates about '+pct+' percent '+dir+' than the recipes as written.';
+    /* the plate on the shelf is not this one yet: say what Save does, in the same words */
+    if(S.setup&&Math.abs(p.plate-PLATE)>1e-9)s+=' They are '+(PLATE===1?'as written':'about '+Math.round(Math.abs(1-PLATE)*100)+' percent '+(PLATE<1?'smaller':'larger'))+' now; save, and they follow.';}
   return s;
 }
 function fieldBody(prefix){
@@ -2451,7 +2462,8 @@ function frSync(){
 }
 /* ---- STORES: which stores are in play and, where two carry an item, which one ----------- */
 let SPICK=null,SMSG='';                 /* the picker's unsaved choice: {shop:[...], picks:{}} */
-let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cadence:'',countdown:false,kind:'grocery',msg:''};   /* the editor's typed values, kept across a redraw */
+let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cadence:'',countdown:false,kind:'grocery',msg:''};
+let SEDIT={key:'',name:'',kind:'grocery',threshold:'',cadence:'',msg:''};   /* a store being changed under Stores, by key */   /* the editor's typed values, kept across a redraw */
 /* A save fetches the page again, because the catalog is resolved on the Mac and rides inside
    it; this remembers where he was so the reload lands him back on the editor. */
 function returnTo(extra){try{sessionStorage.setItem('lt:return',JSON.stringify(Object.assign({tab:'you',mk:'overview',at:'sed'},extra||{})));}catch(e){}}
@@ -2468,9 +2480,23 @@ function viewStores(){
   h+='<div class="rows">';
   SCAT.forEach(sk=>{const st=STORES[sk],on=P.shop.includes(sk);
     h+='<div class="row"><input class="tick" type="checkbox" id="st-'+esc(sk)+'"'+(on?' checked':'')+' data-fk="store:'+esc(sk)+'" onchange="act.storeToggle(\''+esc(sk)+'\')">'+
-      '<label class="row__body" for="st-'+esc(sk)+'"><span class="row__title">'+esc(st.name)+'</span><span class="row__meta">'+esc(String(st.cadence||'').replace(/^\w/,c=>c.toUpperCase()))+(st.cadence?' · ':'')+
-      'carries '+carried(sk)+' of '+live.length+' items · list opens at '+(st.threshold||0)+' meals of supply</span></label></div>';});
+      '<label class="row__body" for="st-'+esc(sk)+'"><span class="row__title">'+esc(st.name)+' '+storeMark(st)+'</span><span class="row__meta">'+esc(String(st.cadence||'').replace(/^\w/,c=>c.toUpperCase()))+(st.cadence?' · ':'')+
+      'carries '+carried(sk)+' of '+live.length+' items · list opens at '+(st.threshold||0)+' meals of supply</span></label>'+
+      '<button class="btn btn--sm" type="button" data-fk="sedit:'+esc(sk)+'" onclick="act.storeEdit(\''+esc(sk)+'\')">Change</button></div>';});
   h+='</div>';
+  /* the shipped stores are kinds (Warehouse club, Grocery store); here they take the name of the
+     store they are, and their kind, line and cadence can change too */
+  if(SEDIT.key&&STORES[SEDIT.key]){
+    h+='<p class="t-note" style="margin-top:var(--s4);margin-bottom:var(--s2)">Change '+esc(STORES[SEDIT.key].name)+'. The name is yours to give it: Costco, Kroger, the corner shop.</p><div class="formgrid">'+
+      '<div class="field wide"><span>Name</span><input data-fk="sename" value="'+esc(SEDIT.name)+'" oninput="act.sedit(\'name\',this.value)"></div>'+
+      '<div class="field wide"><span>Kind of store</span><select data-fk="sekind" onchange="act.sedit(\'kind\',this.value)">'+
+        [['grocery','Grocery store'],['warehouse','Warehouse club'],['market','Market or other']].map(([v,l])=>'<option value="'+v+'"'+(SEDIT.kind===v?' selected':'')+'>'+l+'</option>').join('')+'</select></div>'+
+      '<div class="field"><span>List opens at, meals of supply</span><input type="number" inputmode="numeric" min="1" data-fk="sethr" value="'+esc(SEDIT.threshold)+'" oninput="act.sedit(\'threshold\',this.value)"></div>'+
+      '<div class="field"><span>How often</span><input data-fk="secad" value="'+esc(SEDIT.cadence)+'" oninput="act.sedit(\'cadence\',this.value)"></div></div>'+
+      '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn btn--ink" type="button" data-fk="sesave" onclick="act.storeSave()">Save changes</button>'+
+      '<button class="btn" type="button" data-fk="secancel" onclick="act.storeEdit(\'\')">Cancel</button></div>'+
+      (SEDIT.msg?'<p class="t-note" style="margin-top:var(--s3)">'+esc(SEDIT.msg)+'</p>':'');
+  }
   const choices=live.filter(k=>Object.keys(I[k].offers||{}).filter(s=>P.shop.includes(s)).length>1);
   if(choices.length){
     h+='<p class="t-note" style="margin-top:var(--s4);margin-bottom:var(--s2)">More than one store carries these. Where do you buy them?</p><div class="formgrid">';
@@ -2638,10 +2664,11 @@ const GUIDE=[
   {key:'guide_log',due:v=>!v.empty&&v.cursor===0,done:v=>v.cursor>0,hops:[
     {when:v=>v.tab!=='tonight',sel:'[data-fk="tab:tonight"]',line:'Tonight shows the one plate to cook.'},
     {when:v=>true,sel:'[data-fk="eat"]',line:'Cook this. Once you have eaten, tap Ate it all: the stock moves and the next plate reads in.'}]},
-  {key:'guide_report',due:v=>v.cursor>0&&v.draws===0&&!v.declined,done:v=>v.draws>0||(v.tab==='markers'&&v.mk==='reports'),hops:[
-    {when:v=>v.tab==='tonight',sel:'[data-fk="addreport"]',line:'Got a lab report? Add it here, and a night or two of dinner changes.'},
+  {key:'guide_report',due:v=>v.cursor>0&&v.draws===0&&!v.declined,done:v=>v.draws>0,hops:[
+    {when:v=>v.tab==='tonight',sel:'[data-fk="now:report"],[data-fk="addreport"]',line:'Got a lab report? Add it here, and a night or two of dinner changes.'},
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Your lab reports live under Markers.'},
-    {when:v=>true,sel:'[data-fk="mkadd"]',line:'Tap Add a report: a PDF from any lab, or the numbers typed from paper.'}]},
+    {when:v=>v.mk!=='reports',sel:'[data-fk="mkadd"]',line:'Tap Add a report.'},
+    {when:v=>true,sel:'[data-fk="uplbtn"],[data-fk="typebtn"]',line:'Pick your lab\'s PDF, or type the numbers from paper. No report yet? Skip this for now.'}]},
   {key:'guide_weigh',due:v=>v.draws>0&&v.weighed!==true,done:v=>v.weighed===true,hops:[
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Weigh in under Markers. After three weigh-ins the plate corrects itself.'},
     {when:v=>v.mk!=='body',sel:'[data-fk="mkv:body"]',line:'Body holds the scale.'},
@@ -2667,7 +2694,7 @@ function guidePlan(v){
   return null;
 }
 /* GUIDE-END */
-let GTARGET=null, GKEY=null, GRAF=null;
+let GTARGET=null, GKEY=null, GRAF=null, GPLAN=null, GFORCE=false;
 function guideView(){
   const live=liveItems();
   return {on:!!S.guide,tour:!!S.tour,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,
@@ -2682,26 +2709,32 @@ function guideSync(){
   if(!S.init||!S.guide){g.hidden=true;GTARGET=null;GKEY=null;return;}
   for(let guard=0;guard<8;guard++){
     const p=guidePlan(guideView());
-    if(!p)break;
+    if(!p){if(S.tour){S.tour=false;persist();}break;}                      /* a tour ends when nothing is left to show */
     if(p.done){S.seen.push(p.done);persist();continue;}
     const el=document.querySelector(p.sel);
-    if(!el){if(p.last){S.seen.push(p.key);persist();continue;}break;}     /* nothing to light here: a step whose control is gone is behind you */
+    /* nothing to light here: a step whose control is gone is behind you, unless the screen is
+       still loading, when the control is only not here yet (Markers paints "Loading…" first) */
+    if(!el){const loading=[...document.querySelectorAll('#app .t-body')].some(x=>x.textContent==='Loading…');
+      if(p.last&&!loading){S.seen.push(p.key);persist();continue;}break;}
     if(p.last&&p.arrive&&!S.seen.includes(p.key)){S.seen.push(p.key);persist();}   /* shown once: the light stays for this render */
-    const moved=GKEY!==null&&GKEY!==p.key+p.sel, wasHidden=g.hidden;
-    GTARGET=el;GKEY=p.key+p.sel;
+    const moved=GFORCE||(GKEY!==null&&GKEY!==p.key+p.sel), wasHidden=g.hidden;
+    GFORCE=false;GTARGET=el;GKEY=p.key+p.sel;GPLAN=p;
     const line=document.getElementById('gline');
     if(line.textContent!==p.line){line.textContent=p.line;line.classList.remove('swap');void line.offsetWidth;line.classList.add('swap');}
     document.getElementById('gsteps').innerHTML=GUIDE.map((s,i)=>'<i class="'+(i<p.n?'done':i===p.n?'now':'')+'"></i>').join('');
     g.hidden=false;
-    /* the control comes to the person before the light lands on it: off screen, the page scrolls
-       it to the middle first, and the hole follows the scroll */
+    /* the control comes to the person before the light lands on it: when the light moves to a
+       control off screen, the page scrolls it to the middle first, and the hole follows the
+       scroll. Only when it moves: a redraw while the person has scrolled away leaves them be. */
     const r=el.getBoundingClientRect(), pad=8, off=r.bottom<pad||r.top>window.innerHeight-(pad+140)||(r.width===0&&r.height===0);
-    if(off&&!(r.width===0&&r.height===0)&&el.scrollIntoView)el.scrollIntoView({block:'center',behavior:RM.matches?'auto':'smooth'});
+    if((moved||wasHidden)&&off&&!(r.width===0&&r.height===0)&&el.scrollIntoView)el.scrollIntoView({block:'center',behavior:RM.matches?'auto':'smooth'});
     guidePlace(moved&&!wasHidden);
     return;
   }
-  g.hidden=true;GTARGET=null;GKEY=null;
+  g.hidden=true;GTARGET=null;GKEY=null;GPLAN=null;
 }
+/* the light lands again after something else moved the page (the log moment scrolls to the top) */
+function guideRefresh(){GKEY=null;GFORCE=true;guideSync();}
 /* the hole sits around the control; off screen, the layer dims evenly and the line still reads */
 function guidePlace(glide){
   const hole=document.getElementById('ghole'); if(!hole||!GTARGET)return;
@@ -2724,17 +2757,24 @@ function guidePlace(glide){
   dot.setAttribute('cx',x1.toFixed(1));dot.setAttribute('cy',y1.toFixed(1));dot.setAttribute('r','4');
 }
 ['scroll','resize'].forEach(ev=>window.addEventListener(ev,()=>{if(GTARGET&&!GRAF)GRAF=requestAnimationFrame(()=>{GRAF=null;guidePlace(false);});},{passive:true}));
+/* the light waits for the real action, and the action is the tap: a control the step's last hop
+   names, tapped, puts the step behind the person whatever the state can tell. A tour on a
+   stocked home cannot see "Bought it" in the stock; the tap it can see. */
+document.addEventListener('click',e=>{
+  const p=GPLAN; if(!p||!p.last||!e.target||!e.target.closest)return;
+  if(e.target.closest(p.sel)&&!S.seen.includes(p.key)){S.seen.push(p.key);persist();}
+},true);
 
-/* Appearance, under You. Light is the identity and the app never follows the phone's setting:
-   dark is a choice a person makes here, and the control that owns that stored choice is never
-   removed, only moved. It stood in the masthead until Phase 8. */
+/* Appearance, under You. The app follows the phone's own setting unless a choice is made here,
+   and the control that owns that stored choice is never removed, only moved: it stood in the
+   masthead as a toggle until Phase 8. Light is the identity the design is drawn for; a phone set
+   to light gets light. */
 function viewAppearance(){
-  const dark=document.documentElement.dataset.theme==='dark';
+  const c=window.plateThemeChoice?window.plateThemeChoice():'auto';
+  const opt=(v,l,ic)=>'<button type="button" role="radio" data-fk="theme:'+v+'" aria-checked="'+(c===v)+'" onclick="act.theme(\''+v+'\')">'+(ic?icon(ic):'')+l+'</button>';
   return '<section class="card" id="appearance"><div class="split"><span class="t-label">Appearance</span><span class="mono" style="color:var(--ink-3)">this device</span></div>'+
-    '<div class="seg" role="radiogroup" aria-label="Appearance" style="margin-top:var(--s3)">'+
-    '<button type="button" role="radio" data-fk="theme:light" aria-checked="'+(!dark)+'" onclick="if(document.documentElement.dataset.theme===\'dark\')act.theme()">'+icon('sun')+'Light</button>'+
-    '<button type="button" role="radio" data-fk="theme:dark" aria-checked="'+dark+'" onclick="if(document.documentElement.dataset.theme!==\'dark\')act.theme()">'+icon('moon')+'Dark</button></div>'+
-    '<p class="t-note" style="margin-top:var(--s3)">Light unless you choose dark. The choice stays on this device and never follows the phone\'s own setting.</p></section>';
+    '<div class="seg" role="radiogroup" aria-label="Appearance" style="margin-top:var(--s3)">'+opt('auto','Match my phone','')+opt('light','Light','sun')+opt('dark','Dark','moon')+'</div>'+
+    '<p class="t-note" style="margin-top:var(--s3)">Matches your phone\'s own light or dark setting unless you choose one here. The choice stays on this device.</p></section>';
 }
 /* One masthead on every screen: the brand, the meal and cycle count once the app is set up,
    and one round control, You. The theme choice lives under You (viewAppearance), so the

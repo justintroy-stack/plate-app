@@ -127,23 +127,18 @@ export function targetsFromProfile(prof, today) {
    checks it, then the estimate. `answers` are the interview's other choices, unused here and
    read by the plate sizing beside it. */
 export function targetPreview(home, profile, answers, today) {
-  const has = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
   const prof = {};
   for (const [key, value] of Object.entries(profile || {})) prof[strip(key)] = checkBody(strip(key), value);
   const estimate = targetsFromProfile(prof, today);
-  const out = { estimate, plate: null, kcal: null, measured: null };
+  const out = { estimate, plate: null, kcal: null };
   if (!estimate.missing.length) {
     const diet = loadDiet(home);
     for (const key of ['regimen', 'occasions', 'portions']) {
       if (answers && answers[key] != null) diet[key] = strip(String(answers[key]));
     }
-    /* one figure sizes the plate and is the figure the line says: the body's estimate, unless a
-       tracking app's measured expenditure is on file (diet.py's target_preview) */
-    const cal = calibrateCalories(home, Object.assign({}, diet, { deficit_kcal: String(has(estimate, 'deficit_kcal') ? estimate.deficit_kcal : (has(diet, 'deficit_kcal') ? diet.deficit_kcal : '')) }));
-    const measured = !!(cal && cal.kcal_from_tracker);
-    const kcal = measured ? pyFloat(String(cal.kcal_from_tracker)) : pyFloat(String(estimate.kcal));
+    /* one figure sizes the plate and is the figure the line says: the body's estimate (diet.py's target_preview) */
+    const kcal = pyFloat(String(estimate.kcal));
     out.kcal = kcal;
-    out.measured = measured ? { days: cal.days, expenditure: cal.tracker_expenditure } : null;
     out.plate = plateFor(loadFor(home, loadProfile(home), diet, 1), kcal);
   }
   return out;
@@ -329,8 +324,8 @@ export function buildDiet(home, store, registry) {
     entry.changed = targets[key] !== before;
     fired.push(entry);
   }
+  /* history beside the target, never the target (diet.py's build_diet) */
   const cal = calibrateCalories(home, diet);
-  if (cal && cal.kcal_from_tracker) targets.kcal = pyFloat(cal.kcal_from_tracker);
   const constraints = {};
   for (const [k, v] of Object.entries(diet)) if (!NUMERIC.includes(k)) constraints[k] = v;
   const outStates = {};

@@ -720,8 +720,11 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
 .ledger-val{font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums;flex:none;display:inline-flex;align-items:baseline}
 .ledger-val .u{font-size:11px;opacity:.62;margin-left:4px}
 /* the odometer: every numeral a column that slides to its new digit */
-.odo{display:inline-flex;height:1.1em;overflow:hidden;line-height:1.1;font-weight:inherit}
-.odo i{display:block;font-style:normal;transition:transform .92s var(--ez-out);will-change:transform}
+/* a column is eleven rows tall and says so: as a flex item its height would otherwise stretch to
+   the window's one row, and a percentage transform of one row shows slivers of two digits
+   instead of rolling (what he saw as "weird symbols" that never counted down) */
+.odo{display:inline-flex;align-items:flex-start;height:1.1em;overflow:hidden;line-height:1.1;font-weight:inherit}
+.odo i{display:block;flex:none;height:12.1em;font-style:normal;transition:transform .92s var(--ez-out);will-change:transform}
 .odo i span{display:block;height:1.1em}
 .ledger-next{margin-top:16px;font-size:14.5px;display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative;opacity:0}
 .ledger-next.wipe{animation:lwipe .66s var(--ez-out) both}
@@ -814,24 +817,30 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
 /* Light is the identity, not a default that happens to load first. Dark is a choice and is
    designed quieter, because he has said dark mode hurts his eyes. */
 (function(){
-  const K='lt:theme';
+  /* The app follows the phone's own light-or-dark setting unless a choice is made under You
+     (Appearance): auto is the default, and light is the identity the design is drawn for, so a
+     phone set to light gets light. A choice saved by an earlier design (a toggle, version 2)
+     starts over here at auto; his phone is light and the app was light, so nothing he sees
+     changes. Dark was never his rule: an early build was dark by default and he asked for light,
+     which is what his phone is set to. */
+  const K='lt:theme', V='lt:themev', MQ=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+  function choice(){let s=null;try{if(localStorage.getItem(V)==='3')s=localStorage.getItem(K);}catch(e){}return s==='light'||s==='dark'?s:'auto';}
   function paint(t){
-    const dark=t==='dark';
+    const dark=t==='dark'||(t!=='light'&&!!(MQ&&MQ.matches));
     document.documentElement.dataset.theme=dark?'dark':'light';
+    document.documentElement.dataset.themeChoice=t;
     const m=document.querySelector('meta[name=theme-color]');
     if(m)m.content=dark?'#101415':'#F1F3F2';
   }
-  /* A saved preference is honoured only if this design's own toggle wrote it. The previous
-     page also used this key, and a dark choice made there under a different palette should
-     not follow him here uninvited; light is the identity. */
-  let saved=null; try{ if(localStorage.getItem('lt:themev')==='2') saved=localStorage.getItem(K); }catch(e){}
-  paint(saved || 'light');
-  window.plateTheme=function(){
-    const now=document.documentElement.dataset.theme==='dark'?'light':'dark';
-    try{localStorage.setItem(K,now);localStorage.setItem('lt:themev','2');}catch(e){}
+  paint(choice());
+  window.plateThemeChoice=choice;
+  window.plateTheme=function(v){
+    const now=(v==='light'||v==='dark')?v:'auto';
+    try{localStorage.setItem(K,now);localStorage.setItem(V,'3');}catch(e){}
     paint(now);
   };
-  window.addEventListener('storage',e=>{if(e.key===K)paint(e.newValue||'light');});
+  if(MQ&&MQ.addEventListener)MQ.addEventListener('change',()=>{if(choice()==='auto')paint('auto');});
+  window.addEventListener('storage',e=>{if(e.key===K)paint(choice());});
 })();
 </script>
 </head>
