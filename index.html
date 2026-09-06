@@ -10,9 +10,9 @@
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F1F3F2">
 <title>Plateside</title>
-<meta name="description" content="Plateside turns blood work into dinner.">
+<meta name="description" content="Plateside takes the guesswork out of what to cook, what to buy and when, sized to your weight goal and shaped by your blood work.">
 <meta property="og:title" content="Plateside">
-<meta property="og:description" content="Plateside turns blood work into dinner.">
+<meta property="og:description" content="Plateside takes the guesswork out of what to cook, what to buy and when, sized to your weight goal and shaped by your blood work.">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preload" href="fonts/plate-sans.woff2" as="font" type="font/woff2" crossorigin>
@@ -337,9 +337,11 @@ button.card{width:100%;text-align:left}
 /* CHIPS — Markers' own sub-views, in content, pills that wrap; the current one is ink. They
    used to sit in one row that scrolled sideways with no scrollbar, and at phone width the last
    two were off the right edge with nothing to say so. */
-.chips{display:flex;flex-wrap:wrap;gap:var(--s2);padding:12px var(--gutter) 0}
-.chips button{flex:none;height:36px;padding:0 14px;border-radius:var(--r-pill);background:var(--sunk);color:var(--ink-2);
-  font-size:13.5px;font-weight:640;letter-spacing:-.01em;white-space:nowrap;
+.chips{display:flex;flex-wrap:wrap;gap:6px;padding:12px var(--gutter) 0}
+/* four views fit one row at 375 wide (Add a report left the row for a button in Phase 8):
+   measured 91 + 90 + 53 + 85 with three gaps against 343 */
+.chips button{flex:none;height:36px;padding:0 12px;border-radius:var(--r-pill);background:var(--sunk);color:var(--ink-2);
+  font-size:13px;font-weight:640;letter-spacing:-.01em;white-space:nowrap;
   transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
 .chips button[aria-current="true"]{background:var(--ink);color:var(--enamel)}
 
@@ -593,12 +595,42 @@ table.data td.wrap{white-space:normal;min-width:180px}
 .field{display:flex;flex-direction:column;gap:6px;min-width:0}
 .field>span{font-size:11px;line-height:1;font-weight:680;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
 .field input,.field select,.field textarea{border:0;border-radius:var(--r-sm);padding:11px 13px;font:inherit;
-  font-size:15px;background:var(--sunk);color:var(--ink);min-height:44px;width:100%}
+  font-size:16px;background:var(--sunk);color:var(--ink);min-height:44px;width:100%}   /* 16px: under that iPhone Safari zooms the page on focus and leaves it zoomed, the drift he saw */
 .field input:focus,.field select:focus{outline:2px solid var(--ember);outline-offset:1px}
 /* a date is the phone's own control, made to sit in the well like every other field: Safari on
    iOS otherwise ignores the width and centres the value */
 .field input[type=date]{-webkit-appearance:none;appearance:none;display:block;width:100%;min-width:0;box-sizing:border-box;text-align:left}
 .field input[type=date]::-webkit-date-and-time-value{text-align:left;margin:0}
+/* THE INTERVIEW'S RAIL — five segments under the masthead, lit as each card comes into view,
+   and the bar that rises from the bottom edge with the target line once About you is complete.
+   Motion means arrival and commitment: the rail says how far, the bar says it is done. */
+.fr-rail{position:sticky;top:calc(var(--masth) + env(safe-area-inset-top));z-index:30;display:flex;align-items:center;gap:5px;max-width:560px;
+  margin:0 var(--gutter);padding:10px 0 8px;background:color-mix(in srgb,var(--enamel) 92%, transparent);backdrop-filter:blur(10px)}
+.fr-rail i{display:block;flex:1;height:4px;border-radius:2px;background:var(--sunk);transition:background-color .38s var(--ez-out)}
+.fr-rail i.lit{background:var(--sprout,#8FB339)}
+.fr-rail span{flex:none;margin-left:6px;font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.fr-cta{position:fixed;left:0;right:0;bottom:0;z-index:35;margin:0 auto;max-width:560px;display:flex;flex-direction:column;gap:10px;
+  padding:14px var(--gutter) calc(env(safe-area-inset-bottom) + 14px);background:var(--ink);color:var(--enamel);
+  border-radius:22px 22px 0 0;box-shadow:0 -12px 40px rgba(18,21,14,.28);animation:frrise .52s var(--ez-out) both}
+.fr-cta[hidden]{display:none}
+@keyframes frrise{from{transform:translateY(104%)}}
+.fr-cta-line{font-size:13.5px;line-height:1.4;opacity:.86}
+.fr-cta .btn-eat{min-height:52px}
+/* KMARK — which kind of store carries this: a small glyph and a word, in the row's meta line.
+   Never the store's name on every row; the name is on the list card. */
+.kmark{display:inline-flex;align-items:center;gap:3px;vertical-align:-2px;padding:1px 6px 1px 4px;border-radius:var(--r-pill);
+  background:var(--sunk);color:var(--ink-2);font-size:11px;font-weight:640;letter-spacing:.01em}
+.kmark .i{width:12px;height:12px;stroke-width:1.6}
+.kmark[data-kind="warehouse"]{color:var(--clay-ink,var(--ink-2))}
+.row__meta .onlist{font-style:normal;color:var(--ember)}
+/* SEG — one choice between a few, side by side in a sunk well; the chosen one is ink. Used for
+   Appearance under You. */
+.seg{display:flex;gap:4px;padding:4px;border-radius:var(--r-pill);background:var(--sunk)}
+.seg button{flex:1;min-height:40px;border-radius:var(--r-pill);display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  font-size:14px;font-weight:640;color:var(--ink-2);background:transparent;-webkit-tap-highlight-color:transparent;
+  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
+.seg button .i{width:16px;height:16px;stroke-width:1.6}
+.seg button[aria-checked="true"]{background:var(--ink);color:var(--enamel);box-shadow:var(--lift-1)}
 .formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .formgrid .wide{grid-column:1/-1}
 @media (max-width:520px){.formgrid{grid-template-columns:1fr}}
@@ -606,7 +638,7 @@ table.data td.wrap{white-space:normal;min-width:180px}
 .inline .field{flex:1;min-width:140px}
 .inline .btn,.formgrid .btn{min-height:44px}
 .filepick{display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-.filepick input[type=file]{font-size:14px;color:var(--ink-2);max-width:100%}
+.filepick input[type=file]{font-size:16px;color:var(--ink-2);max-width:100%}
 .code{font-family:var(--mono);font-size:13px;background:var(--sunk);border-radius:var(--r-xs);padding:10px 12px;
   word-break:break-all;color:var(--ink);user-select:all;-webkit-user-select:all;line-height:1.5}
 
@@ -644,31 +676,61 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
    the previous one left 34px of a different surface sitting under the tabs */
 .nav{position:fixed;left:0;right:0;bottom:0;z-index:40;margin:0 auto}
 
-/* ---------- THE LEDGER: the log moment. A sheet rises from the bottom edge in ink, above the
-   page and below nothing; the plate drawn on it tilts and sheds what tonight used into the
-   rows below, each count rolling from what was there to what is left, then the next meal. It
-   goes back down on its own or on a tap, and the new plate reads in underneath. */
+/* ---------- THE LEDGER: the log moment. The page behind blurs and dims; a sheet rises from the
+   bottom edge in ink, lit at the top by the meal's own family colour; the plate on it is the
+   app's own motif with a rim and depth, and it tips toward you in perspective; what tonight used
+   slides off it as pieces in the colour of the zone each came from, and every piece falls into
+   its row, which catches it with a pulse while its count rolls as an odometer to what is left;
+   then Next up wipes in. The sheet goes down on its own or on a tap, and the hero underneath
+   flips to the next plate. Food words and numbers, never praise; nothing under Reduce Motion. */
+#lscrim{position:fixed;inset:0;z-index:59;background:rgba(18,21,14,.36);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  opacity:0;visibility:hidden;transition:opacity .42s var(--ez),visibility 0s linear .42s}
+#lscrim.on{opacity:1;visibility:visible;transition:opacity .46s var(--ez-out)}
 #ledger{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0 auto;max-width:560px;
   background:var(--ink);color:var(--enamel);border-radius:28px 28px 0 0;box-shadow:0 -12px 40px rgba(18,21,14,.28);
   transform:translateY(102%);visibility:hidden;transition:transform .34s var(--ez),visibility 0s linear .34s;
-  padding:0 24px calc(env(safe-area-inset-bottom) + 22px);cursor:pointer}
-#ledger.on{transform:none;visibility:visible;transition:transform .42s var(--ez-out)}
-#ledger canvas{display:block;width:100%;height:168px}
+  padding:0 24px calc(env(safe-area-inset-bottom) + 22px);cursor:pointer;overflow:hidden}
+#ledger.on{transform:none;visibility:visible;transition:transform .56s var(--ez-spring)}
+#ledger::before{content:"";position:absolute;left:50%;top:-150px;width:460px;height:330px;transform:translateX(-50%);pointer-events:none;
+  background:radial-gradient(closest-side, color-mix(in srgb,var(--lit,#B6E44F) 34%, transparent), transparent)}
+.lp-stage{position:relative;height:178px;perspective:620px;perspective-origin:50% 12%}
+.lp{position:absolute;left:50%;top:50%;width:152px;height:152px;margin:-70px 0 0 -76px;border-radius:50%;
+  background:
+    radial-gradient(circle at 36% 30%, rgba(255,255,255,.26), transparent 44%),
+    radial-gradient(circle at 50% 50%, rgba(255,255,255,.11) 0 57%, rgba(255,255,255,.03) 57.5% 69%, rgba(255,255,255,.18) 69.5% 79%, rgba(255,255,255,.07) 79.5% 100%);
+  box-shadow:0 0 0 1.5px rgba(255,255,255,.38) inset, 0 22px 44px rgba(0,0,0,.5);
+  transform:rotateX(0deg);transform-origin:50% 100%;will-change:transform}
+#ledger.on .lp{animation:lptilt .82s var(--ez-spring) .5s both}
+@keyframes lptilt{to{transform:rotateX(64deg)}}
+.lpc{position:absolute;left:0;top:0;width:11px;height:11px;border-radius:3.5px;background:var(--pc,#fff);box-shadow:0 1px 3px rgba(0,0,0,.4);
+  will-change:transform,opacity;pointer-events:none}
+.lpc.round{border-radius:50%}
 .lrise{animation:lrise .52s var(--ez-out) both}
 @keyframes lrise{from{opacity:0;transform:translateY(14px)}}
-.ledger-eye{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.66}
-.ledger-big{font-size:clamp(28px,8vw,36px);line-height:1.02;font-weight:780;letter-spacing:-.03em;margin-top:8px;font-stretch:112%}
-.ledger-how{font-size:14px;opacity:.72;margin-top:6px}
-.ledger-rows{margin-top:14px}
-.ledger-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0}
-.ledger-row+.ledger-row{border-top:1px solid rgba(255,255,255,.12)}
+.ledger-eye{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.66;position:relative}
+.ledger-big{font-size:clamp(28px,8vw,36px);line-height:1.02;font-weight:780;letter-spacing:-.03em;margin-top:8px;font-stretch:112%;position:relative}
+.ledger-how{font-size:14px;opacity:.72;margin-top:6px;position:relative}
+.ledger-rows{margin-top:12px;position:relative}
+.ledger-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 10px;margin:0 -10px;border-radius:12px;position:relative}
+.ledger-row+.ledger-row{box-shadow:0 -1px 0 rgba(255,255,255,.1)}
+.ledger-row.catch{animation:lcatch .66s var(--ez-spring)}
+@keyframes lcatch{0%{background:color-mix(in srgb,var(--pc,#fff) 30%, transparent);transform:scale(1.03)}100%{background:transparent;transform:scale(1)}}
 .ledger-name{display:block;font-size:14.5px;font-weight:600}
 .ledger-meta{display:block;font-size:12px;opacity:.62;margin-top:2px;line-height:1.35}
-.ledger-val{font-family:var(--mono);font-size:18px;font-variant-numeric:tabular-nums;flex:none}
+.ledger-val{font-family:var(--mono);font-size:19px;font-variant-numeric:tabular-nums;flex:none;display:inline-flex;align-items:baseline}
 .ledger-val .u{font-size:11px;opacity:.62;margin-left:4px}
-.ledger-next{margin-top:16px;font-size:14.5px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+/* the odometer: every numeral a column that slides to its new digit */
+.odo{display:inline-flex;height:1.1em;overflow:hidden;line-height:1.1;font-weight:inherit}
+.odo i{display:block;font-style:normal;transition:transform .92s var(--ez-out);will-change:transform}
+.odo i span{display:block;height:1.1em}
+.ledger-next{margin-top:16px;font-size:14.5px;display:flex;align-items:center;justify-content:space-between;gap:10px;position:relative;opacity:0}
+.ledger-next.wipe{animation:lwipe .66s var(--ez-out) both}
+@keyframes lwipe{from{clip-path:inset(0 100% 0 0);opacity:.4}to{clip-path:inset(0 0 0 0);opacity:1}}
 .ledger-next b{font-weight:700}
 .ledger-next .i{flex:none;opacity:.7;width:18px;height:18px}
+/* the hero flips to the next plate as the sheet goes */
+.flipin{animation:flipin .74s var(--ez-spring) both;transform-origin:50% 50%;backface-visibility:hidden}
+@keyframes flipin{from{transform:perspective(1100px) rotateY(-64deg) scale(.96);opacity:.3}}
 
 /* ---------- THE GUIDE: a light on the real control. A dim layer with a hole around the one
    control to touch next, and one line with Skip in a panel above the tabs. The layer takes no
@@ -676,14 +738,33 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
    and glides to the next one when the real action fires. Each step once ever, in S.seen. */
 #guide{position:fixed;inset:0;z-index:50;pointer-events:none;overflow:hidden;animation:gfade .38s var(--ez-out) both}
 @keyframes gfade{from{opacity:0}}
-.g-hole{position:absolute;border-radius:var(--r-lg);box-shadow:0 0 0 200vmax rgba(18,21,14,.5)}
-.g-hole.glide{transition:top var(--d-enter) var(--ez-out),left var(--d-enter) var(--ez-out),width var(--d-enter) var(--ez-out),height var(--d-enter) var(--ez-out)}
+.g-hole{position:absolute;border-radius:var(--r-lg);box-shadow:0 0 0 200vmax rgba(18,21,14,.56)}
+.g-hole.glide{transition:top .62s var(--ez-out),left .62s var(--ez-out),width .62s var(--ez-out),height .62s var(--ez-out)}
+/* the ring breathes around the hole, so the light reads as alive and not a stencil; the page
+   under it stays usable. The pointer is a dashed line from the panel to the control, drawn
+   fresh each placement, its dot at the control's edge. */
+.g-ring{position:absolute;inset:-7px;border-radius:calc(var(--r-lg) + 7px);border:2px solid var(--sprout-lit,#D6E8A0);opacity:0;
+  animation:gbreathe 1.9s var(--ez) .4s infinite}
+@keyframes gbreathe{0%{opacity:0;transform:scale(.97)}28%{opacity:.95}100%{opacity:0;transform:scale(1.1)}}
+#gpointer{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#gpointer path{fill:none;stroke:var(--sprout-lit,#D6E8A0);stroke-width:2;stroke-dasharray:5 7;stroke-linecap:round;opacity:.9;
+  animation:gdash 1.2s linear infinite}
+@keyframes gdash{to{stroke-dashoffset:-24}}
+#gpointer circle{fill:var(--sprout-lit,#D6E8A0)}
 .g-panel{position:absolute;left:14px;right:14px;bottom:calc(var(--navh) + env(safe-area-inset-bottom) + 46px);
-  pointer-events:auto;display:flex;align-items:center;gap:10px;padding:12px 12px 12px 16px;
+  pointer-events:auto;padding:12px 12px 12px 16px;
   background:var(--ink);color:var(--enamel);border-radius:var(--r-lg);box-shadow:var(--lift-2)}
+.g-steps{display:flex;gap:5px;margin-bottom:9px}
+.g-steps i{display:block;flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.18);transition:background-color var(--d-state) var(--ez)}
+.g-steps i.done{background:var(--sprout-lit,#D6E8A0)}
+.g-steps i.now{background:var(--enamel)}
+.g-row{display:flex;align-items:center;gap:10px}
 .g-line{flex:1;text-align:left;font-size:15px;line-height:1.4;font-weight:520;color:var(--enamel);padding:0;min-height:0}
+.g-line.swap{animation:gswap .38s var(--ez-out) both}
+@keyframes gswap{from{opacity:0;transform:translateY(8px)}}
 .g-skip{flex:none;min-height:34px;padding:0 14px;border-radius:var(--r-pill);background:rgba(255,255,255,.14);color:var(--enamel);font-size:13px;font-weight:640}
 @media (min-width:900px){.g-panel{left:0;right:0;width:560px;margin:0 auto}}
+@media (prefers-reduced-motion:reduce){.g-ring,#gpointer path{animation:none}.g-ring{opacity:.9}}
 
 .mast{position:fixed;top:0;left:0;right:0;z-index:45;margin:0 auto;color:var(--ink);
   background:color-mix(in srgb,var(--enamel) 86%, transparent);
@@ -692,8 +773,9 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   padding:0 22px;font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase}
 .mast .brand{font-family:var(--sans);font-weight:800;letter-spacing:.2em;font-size:11.5px}
 .mast .folio{color:var(--ink-3)}
-/* the two round controls, the theme mark and You: sunk wells, the system's button at rest;
-   nothing here has a border, and the word each carries is its label. You is ink while open. */
+/* the round control, You: a sunk well, the system's button at rest; nothing here has a border,
+   and the word it carries is its label. You is ink while open. The theme mark stood beside it
+   until Phase 8, when the choice moved to an Appearance row under You. */
 .mast .tog{background:var(--sunk);border-radius:var(--r-pill);width:34px;height:34px;padding:0;color:var(--ink-2);
   display:grid;place-items:center;-webkit-tap-highlight-color:transparent;
   transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez),transform var(--d-press) var(--ez)}
@@ -790,6 +872,10 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   <symbol id="i-alert" viewBox="0 0 16 16"><path d="M8 2.2L14.6 13.6H1.4Z"/><path d="M8 6.4v3.4M8 11.4v.9"/></symbol>
   <!-- the errand: a shopping bag, handles up. A store's tile on Kitchen, and the one run
        that is due. -->
+  <!-- the kind of store: a warehouse club is cases on a pallet, a grocery store a basket. Beside
+       an item on Kitchen, so the row says which kind of store carries it without the name. -->
+  <symbol id="i-club" viewBox="0 0 16 16"><path d="M3 8.5H13V12.5H3Z"/><path d="M5 4.5H11V8.5H5Z"/><path d="M2.5 13.5H13.5"/></symbol>
+  <symbol id="i-cart" viewBox="0 0 16 16"><path d="M2.5 6.5H13.5L12.2 12.5H3.8Z"/><path d="M5.5 6.5L8 2.8L10.5 6.5"/><path d="M6.5 9V10.5M9.5 9V10.5"/></symbol>
   <symbol id="i-bag" viewBox="0 0 16 16"><path d="M3.5 5.5H12.5L11.8 13.5H4.2Z"/><path d="M5.8 5.5V4.3A2.2 2.2 0 0 1 10.2 4.3V5.5"/></symbol>
   <!-- the fridge and the pantry: a door with a shelf, and a jar. Zone tiles on Kitchen. -->
   <symbol id="i-fridge" viewBox="0 0 16 16"><path d="M3.5 2.5H12.5V13.5H3.5Z"/><path d="M3.5 7H12.5"/><path d="M6 4.5V5.5M6 9V10.5"/></symbol>
@@ -807,10 +893,13 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
  </defs>
 </svg>
 
+<div id="lscrim" aria-hidden="true"></div>
 <div id="ledger" aria-hidden="true"></div>
-<div id="guide" hidden><div class="g-hole" id="ghole"></div>
-  <div class="g-panel" role="status" aria-live="polite"><button class="g-line" type="button" id="gline" data-fk="guideline" onclick="act.guideFind()"></button>
-  <button class="g-skip" type="button" data-fk="guideskip" onclick="act.guideSkip()">Skip</button></div></div>
+<div id="guide" hidden><div class="g-hole" id="ghole"><i class="g-ring"></i></div>
+  <svg id="gpointer" aria-hidden="true"><path id="gpath" d=""/><circle id="gdot" r="4"/></svg>
+  <div class="g-panel" role="status" aria-live="polite"><div class="g-steps" id="gsteps" aria-hidden="true"></div>
+  <div class="g-row"><button class="g-line" type="button" id="gline" data-fk="guideline" onclick="act.guideFind()"></button>
+  <button class="g-skip" type="button" data-fk="guideskip" onclick="act.guideSkip()">Skip</button></div></div></div>
 <header class="mast" id="mast" aria-label="Plateside"></header>
 <main id="app"></main>
 <nav class="nav" id="nav" aria-label="Plateside"></nav>

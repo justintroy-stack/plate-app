@@ -16,7 +16,7 @@ import { loadExplanations } from './explain.js';
 import { loadBody, loadIntake } from './tracker.js';
 import { buildDiet, checkBody, loadDiet, targetPreview, targetsFromProfile, ESTIMATE_KEYS } from './diet.js';
 import { plateFor } from './rotation.js';
-import { appendWeighIn, loadLog, stepPlate, summary as bodySummary } from './body.js';
+import { ackPlate, appendWeighIn, loadLog, stepPlate, stepped as bodyStepped, undoPlate, summary as bodySummary } from './body.js';
 import { config as plateConfig } from './plate.js';
 import { today } from './pydate.js';
 import { buildSummary, buildTrend, buildPlan, suggestedDraw } from './planner.js';
@@ -92,15 +92,25 @@ export function installApi(home, ctx) {
   const store = () => new CsvStore(home);
   const dietOrNull = () => { try { return buildDiet(home, store(), registry()); } catch (e) { return null; } };
   const weigh = () => bodySummary(loadBody(home), loadDiet(home), loadProfile(home), loadLog(home), today(home.now.bind(home)));
+  /* the scale's step applies itself at a weigh-in and Tonight says so with Undo (server.py's _auto_step) */
+  const autoStep = () => {
+    const v = weigh().verdict;
+    if (v.state !== 'propose') return null;
+    stepPlate(home, v.plate_next, today(home.now.bind(home)), loadDiet(home));
+    const out = Object.assign({}, bodyStepped(loadDiet(home)) || {});
+    Object.assign(out, { step: v.step, slope: v.slope, expected: v.expected, points: v.points, window_days: v.window_days, goal: v.goal });
+    return out;
+  };
 
   const GET = {
     '/api/summary': () => buildSummary(home, store(), registry()),
     '/api/trend': (q) => buildTrend(home, store(), registry(), q.get('marker') || ''),
     '/api/plan': (q) => {
       const st = store();
-      const draw = q.get('draw') || suggestedDraw(home, st);
+      const draw = q.get('draw') || suggestedDraw(home, st) || today(home.now.bind(home));
       const plan = buildPlan(home, st, registry(), draw, q.get('cadence') ? parseInt(q.get('cadence'), 10) : null);
-      plan.suggested_draw = suggestedDraw(home, st);
+      const sd = suggestedDraw(home, st);
+      plan.suggested_draw = sd ? sd : null;
       return plan;
     },
     '/api/explain': () => loadExplanations(home),
@@ -245,15 +255,18 @@ export function installApi(home, ctx) {
       const on = String(body.date || '').trim() || today(home.now.bind(home));
       const point = appendWeighIn(home, on, body.weight_lb);
       await flush(home);
-      const w = weigh(), v = w.verdict;
-      const prop = v.state === 'propose' ? { step: v.step, plate: v.plate, plate_next: v.plate_next, slope: v.slope, expected: v.expected,
-                                             points: v.points, window_days: v.window_days, goal: v.goal } : null;
-      return { ok: true, point, weigh: w, proposal: prop };
+      const stepped = autoStep();
+      await flush(home);
+      return { ok: true, point, weigh: weigh(), stepped };
     },
     '/api/plate': async (q, init) => {
-      /* the person confirmed the scale's proposal: the plate steps, the window restarts */
+      /* Undo puts the plate the scale replaced back with its own date; Got it keeps the plate and
+         drops the line; a plate given outright is set, the window restarting (server.py's /api/plate) */
       const body = await bodyJson(init);
-      const value = stepPlate(home, body.plate, today(home.now.bind(home)));
+      let value;
+      if (body.undo) value = undoPlate(home, loadDiet(home));
+      else if (body.ack) { ackPlate(home); value = pc.plateFromDiet(loadDiet(home)); }
+      else value = stepPlate(home, body.plate, today(home.now.bind(home)));
       await flush(home);
       return { ok: true, plate: value };
     },

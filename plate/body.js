@@ -105,10 +105,29 @@ export function appendWeighIn(home, onDate, weightLb) {
   return pts.get(d);
 }
 
-export function stepPlate(home, plate, onDate) {
+export function stepPlate(home, plate, onDate, remember = null) {
+  setDiet(home, 'plate_prev', remember !== null ? numstr(plateFromDiet(remember)) : '');
+  setDiet(home, 'plate_prev_since', remember !== null ? strip(has(remember, 'plate_since') ? remember.plate_since : '') : '');
   setDiet(home, 'plate', numstr(pyFloat(String(plate))));
   setDiet(home, 'plate_since', onDate);
   return plateFromDiet({ plate: numstr(pyFloat(String(plate))) });
+}
+
+/* Undo: the plate the scale replaced comes back with its own date (body.py's undo_plate) */
+export function undoPlate(home, diet) {
+  const prev = strip(has(diet, 'plate_prev') ? diet.plate_prev : '');
+  if (!prev) throw new ConfigError('nothing to undo: the scale has not stepped the plate');
+  setDiet(home, 'plate', prev);
+  setDiet(home, 'plate_since', strip(has(diet, 'plate_prev_since') ? diet.plate_prev_since : ''));
+  setDiet(home, 'plate_prev', '');
+  setDiet(home, 'plate_prev_since', '');
+  return plateFromDiet({ plate: prev });
+}
+
+/* Got it: the line goes, the plate stays (body.py's ack_plate) */
+export function ackPlate(home) {
+  setDiet(home, 'plate_prev', '');
+  setDiet(home, 'plate_prev_since', '');
 }
 
 /* how many of the last `days` days have a meal logged here; `today` is an ISO date */
@@ -135,10 +154,10 @@ export function summary(rows, diet, prof, logRows, today) {
 }
 
 /* the one line Tonight carries: a plate step the scale proposes, or null; no clock in it */
-export function proposal(rows, diet, prof) {
-  const v = verdict(trend(rows), strip((has(prof, 'goal') && prof.goal) || 'hold'), strip((has(prof, 'rate') && prof.rate) || 'gentle'),
-                    plateFromDiet(diet), strip(has(diet, 'plate_since') ? diet.plate_since : ''));
-  if (v.state !== 'propose') return null;
-  return { step: v.step, plate: v.plate, plate_next: v.plate_next, slope: v.slope, expected: v.expected,
-           points: v.points, window_days: v.window_days, goal: v.goal };
+/* the one line Tonight carries after the scale has stepped the plate, until Got it or Undo (body.py's stepped) */
+export function stepped(diet) {
+  const prev = strip(has(diet, 'plate_prev') ? diet.plate_prev : '');
+  if (!prev) return null;
+  return { plate_prev: plateFromDiet({ plate: prev }), plate: plateFromDiet(diet),
+           since: strip(has(diet, 'plate_since') ? diet.plate_since : ''), prev_since: strip(has(diet, 'plate_prev_since') ? diet.plate_prev_since : '') };
 }

@@ -30,7 +30,7 @@ export const DIET_KEYS = ['equipment', 'hands_on_minutes', 'regimen', 'avoid', '
 // the diet.csv rows the app itself writes: the choices, the day's numbers About you estimates,
 // and the plate: one factor per household that scales every recipe, and the date it last changed
 export const TARGET_ROWS = ['kcal', 'protein_g', 'fiber_g', 'sat_fat_g', 'added_sugar_g', 'deficit_kcal'];
-export const DIET_EDITABLE = ['regimen', 'avoid', 'portions', 'occasions', 'equipment', 'hands_on_minutes', 'plate', 'plate_since', ...TARGET_ROWS];
+export const DIET_EDITABLE = ['regimen', 'avoid', 'portions', 'occasions', 'equipment', 'hands_on_minutes', 'plate', 'plate_since', 'plate_prev', 'plate_prev_since', ...TARGET_ROWS];
 // The plate factor's bounds and step. Outside them a plan cannot be scaled that far: a recipe
 // written for one adult does not survive being cut below half or grown past 140 percent.
 export const PLATE_MIN = 0.5, PLATE_MAX = 1.4, PLATE_STEP = 0.05;
@@ -45,7 +45,8 @@ export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 
 export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy'];
 // The food behind each count the planner keeps. Red meat in this catalog is beef.
 export const COUNT_TAGS = { red_meat_slots: 'beef', fish_slots: 'fish', beans_slots: 'beans' };
-export const STORE_COLUMNS = ['key', 'name', 'list_threshold_meals', 'countdown', 'cadence', 'note'];
+export const STORE_COLUMNS = ['key', 'name', 'kind', 'list_threshold_meals', 'countdown', 'cadence', 'note'];
+export const STORE_KINDS = ['warehouse', 'grocery', 'market'];
 export const STORE_ITEM_COLUMNS = ['store', 'item', 'pack', 'buy', 'note'];
 export const EQUIPMENT_COLUMNS = ['id', 'name', 'modes', 'note'];
 export const COOKING_COLUMNS = ['equipment', 'meal', 'mode', 'temp_f', 'minutes', 'tray', 'band', 'hands_on'];
@@ -488,7 +489,9 @@ export function load(home, opts = {}) {
   const stores = {}, store_catalog = [];
   for (const r of rows(home, 'stores')) {
     if (!get(r, 'key')) continue;
+    const kind = lower(strip(get(r, 'kind', '')));
     stores[r.key] = { key: r.key, name: req(r, 'name'), threshold: num(get(r, 'list_threshold_meals'), 21),
+      kind: STORE_KINDS.includes(kind) ? kind : (lower(get(r, 'countdown', '')) === 'yes' ? 'warehouse' : 'grocery'),
       countdown: lower(get(r, 'countdown', '')) === 'yes', cadence: get(r, 'cadence', ''),
       note: get(r, 'note', ''), shop: true };
     store_catalog.push(r.key);
@@ -910,6 +913,11 @@ export function upsertStore(home, data) {
   }
   Object.assign(row, { name, list_threshold_meals: fmtNum(thr), countdown: isTruthyWord(get(data, 'countdown')) ? 'yes' : 'no',
     cadence: strip(optStr(get(data, 'cadence'))) });
+  if (get(data, 'kind') != null) {
+    const kind = lower(strip(pyStr(data.kind)));
+    if (kind && !STORE_KINDS.includes(kind)) throw new ConfigError("a store's kind is one of " + STORE_KINDS.join(', ') + ', not ' + pyReprStr(kind));
+    row.kind = kind;
+  }
   if (get(data, 'note') != null) row.note = strip(pyStr(data.note));
   tryRows(home, { stores: [fields, rs] });
   saveRows(home, 'stores', fields, rs);
@@ -1002,6 +1010,8 @@ const DIET_NOTES = {
   deficit_kcal: 'How far under estimated maintenance the calories sit (negative means over, to gain); from the goal in About you',
   plate: "The plate: one factor scaling every recipe's quantities and nutrition together, sized from the day's target and stepped by the weigh-ins. Blank means 1, the recipes as written",
   plate_since: 'The date the plate last changed, which restarts the weigh-in window; the app writes it',
+  plate_prev: "The plate the scale's last step replaced, kept until Got it or Undo on Tonight; the app writes it",
+  plate_prev_since: 'The date that replaced plate had been set on, so Undo resumes its window; the app writes it',
 };
 
 /* One row in diet.csv, for the choices the app itself writes (DIET_EDITABLE). A regimen
@@ -1061,19 +1071,19 @@ export function checkDiet(home, key, value) {
     if (!(lo <= n && n <= hi)) throw new ConfigError(key + ' must be between ' + lo + ' and ' + hi + ', not ' + numstr(n));
     return numstr(n);
   }
-  if (key === 'plate' && value) {
+  if ((key === 'plate' || key === 'plate_prev') && value) {
     let p;
     try {
       p = num(value);
     } catch (e) {
-      if (e instanceof PyValueError) throw new ConfigError('plate must be a number, not ' + pyReprStr(value));
+      if (e instanceof PyValueError) throw new ConfigError(key + ' must be a number, not ' + pyReprStr(value));
       throw e;
     }
-    if (!(PLATE_MIN <= p && p <= PLATE_MAX)) throw new ConfigError('plate must be between ' + numstr(PLATE_MIN) + ' and ' + numstr(PLATE_MAX) + ', not ' + numstr(p));
+    if (!(PLATE_MIN <= p && p <= PLATE_MAX)) throw new ConfigError(key + ' must be between ' + numstr(PLATE_MIN) + ' and ' + numstr(PLATE_MAX) + ', not ' + numstr(p));
     return numstr(p);
   }
-  if (key === 'plate_since' && value) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !isValidIso(value)) throw new ConfigError('plate_since must be a date, YYYY-MM-DD, not ' + pyReprStr(value));
+  if ((key === 'plate_since' || key === 'plate_prev_since') && value) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !isValidIso(value)) throw new ConfigError(key + ' must be a date, YYYY-MM-DD, not ' + pyReprStr(value));
   }
   return value;
 }

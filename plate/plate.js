@@ -16,7 +16,7 @@ import { MarkerRegistry } from './markers.js';
 import { CsvStore } from './store.js';
 import * as pc from './plate_config.js';
 import { buildPlan, normalizeOrder, groupNote } from './rotation.js';
-import { proposal } from './body.js';
+import { stepped } from './body.js';
 import { loadBody } from './tracker.js';
 
 export const STATE_PATH = 'labs/plate_state.json';
@@ -48,7 +48,7 @@ export function payload(home, diet, cfg) {
   cfg = cfg || config(home);
   const out = Object.assign({}, cfg);
   out.plan = diet ? buildPlan(cfg, diet, currentOrder(home)) : null;
-  out.plate_proposal = proposal(loadBody(home), loadDiet(home), loadProfile(home));
+  out.plate_step = stepped(loadDiet(home));
   out.group_note = groupNote(cfg);
   out.labs = labsOnFile(home);
   return out;

@@ -165,7 +165,7 @@ export function suggestedDraw(home, store) {
   const prof = loadProfile(home);
   const cadence = pyInt(prof.draw_cadence_months || 6);
   const ld = lastDrawDate(rows);
-  if (!ld) return today(home.now.bind(home));
+  if (!ld) return null;      /* the first draw sets the clock; no date is invented before it */
   const [y, m, d] = unpackInts3(ld);
   const nxt = addMonths(pyDate(y, m, d), cadence);
   return pyMaxDate(nxt, today(home.now.bind(home)));

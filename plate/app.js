@@ -205,7 +205,11 @@ function stockedFor(){const used=consumedSet(targetOrder()),inv={};IORDER.forEac
 function liveItems(){const used=consumedSet(targetOrder());return IORDER.filter(k=>used.has(k)||(S.inv[k]||0)>0);}
 function perCycle(order,k){let n=0;order.forEach(id=>{const m=MEALS[id];if(m&&m.uses[k])n+=m.uses[k];});
   SLOTS.forEach(sl=>{const opts=liveOpts(sl)||[];let a=0;opts.forEach(o=>{a+=(o.uses[k]||0);});if(opts.length)n+=a/opts.length*N;});return Math.round(n*10)/10;}
-const storeOf=k=>STORES[I[k].store]||null;      /* null: no store in play carries it */
+const storeOf=k=>STORES[I[k].store]||null;
+/* the kind of store, as a small mark with a word: which kind carries an item, without printing
+   the store's name on every row. The name stays on the list card and the tiles. */
+const KINDWORD={warehouse:'Club',grocery:'Grocery',market:'Market'};
+const storeMark=st=>st?'<span class="kmark" data-kind="'+esc(st.kind||'grocery')+'">'+icon(st.kind==='warehouse'?'club':'cart')+esc(KINDWORD[st.kind]||'Market')+'</span>':'';      /* null: no store in play carries it */
 function runIn(F){const used=consumedSet(targetOrder());let m=H,w=null;
   /* the store the countdown follows: any store flagged for it, else the first one in play, the
      fallback countdownStore() already makes, so a home with no warehouse club counts down too */
@@ -226,7 +230,11 @@ function tripNeed(sk,n,F){const used=consumedSet(targetOrder()), tot=drawOver(n,
   return IORDER.filter(k=>I[k].store===sk&&used.has(k)&&(tot[k]||0)>0).map(k=>buyRow(k,n,tot)).filter(r=>r.short>0);}
 /* the store's own list with its quantities: it holds what runs out on or before the threshold
    meal, so its horizon is one meal past the threshold and every row on it is short */
-function listRows(sk,F){F=F||forecast();const st=STORES[sk], n=(st.threshold||0)+1, tot=drawOver(n,F);return need(F,st).map(k=>buyRow(k,n,tot));}
+function listRows(sk,F){F=F||forecast();const st=STORES[sk], ks=need(F,st), first=ks.length>0&&ks.every(k=>(S.inv[k]||0)===0),
+  n=(first?Math.max(st.threshold||0,FIRST_RUN):(st.threshold||0))+1, tot=drawOver(n,F);return ks.map(k=>buyRow(k,n,tot));}
+/* a first run, every item at zero, covers three weeks of meals whatever the store's own line, so
+   a weekly store's list does not reopen after one meal */
+const FIRST_RUN=21;
 const countdownStore=()=>SORDER.map(k=>STORES[k]).find(s=>s.countdown)||STORES[SORDER[0]];
 
 /* what the log is about to change, kept so it can be put back */
@@ -270,7 +278,10 @@ window.act={
    if(tab!=='you')YOUFROM=tab;tab='you';OPEN=null;MSG='';
    if(at)SCROLLTO=at;render();if(!at)window.scrollTo({top:0,behavior:'smooth'});if(MK===null)loadMarkers();},
  begin(s){S.inv={...EMPTY};if(s)S.inv=stockedFor();S.init=true;S.pending={};S.applied=[];S.gate0={};tab=s?'tonight':'kitchen';adoptPlan();persist();render();
-   if(!s)say('Empty. Your first list is on Kitchen.');},
+   if(!s)say('Your kitchen starts empty. This first list stocks it.');},
+ /* the quiet button on the first list: a pack of everything the rotation uses is already on the
+    shelf, so the list closes and Tonight is the plate to cook */
+ stocked(){S.inv=stockedFor();tab='tonight';persist();render();say('Stocked: a pack of everything the rotation uses.');},
  planB(o){planB=o&&!!PLANB;partial=false;render();},
  swap(){const p=posAt(0),q=posAt(1),t=S.order[p];S.order[p]=S.order[q];S.order[q]=t;
    planB=false;TRADED=MEALS[S.order[q]]?MEALS[S.order[q]].name:null;persist();render();
@@ -438,6 +449,7 @@ window.act={
  bodySet(k,v,prefix){BODYF[k]=v;if(k==='goal'){const el=document.getElementById(prefix+'rate');if(el&&el.parentNode)el.parentNode.style.visibility=v==='hold'?'hidden':'';}
    const line=document.getElementById(prefix+'target');clearTimeout(TGTT);TGT=null;
    if(line)line.textContent=targetLine();
+   if(prefix==='fr-')frSync();
    if(!bodyMissing().length)TGTT=setTimeout(()=>act.estimate(prefix),250);},
  async estimate(prefix){
    const line=()=>document.getElementById(prefix+'target');
@@ -447,20 +459,28 @@ window.act={
      if(JSON.stringify(bodyProfile())!==asked)return;      /* typed on while waiting: a newer ask is coming */
      TGT=r;}
    catch(e){TGT={error:e.message};}
-   if(line())line().textContent=targetLine();},
- /* The scale's proposal, confirmed: the plate steps and the page is fetched again, since every
-    quantity the config carries is scaled by it. */
- async stepPlate(v){
-   try{await api('/api/plate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plate:v})});
-     say('Plates resized from the next cook.');setTimeout(()=>location.reload(),350);}
+   if(line())line().textContent=targetLine();
+   if(prefix==='fr-')frSync();},
+ /* The scale's step, undone or acknowledged. Undo puts the plate the scale replaced back with
+    its own date and fetches the page again, since every quantity the config carries is scaled
+    by the plate; Got it keeps the plate and drops the line. */
+ async undoPlate(){
+   try{await api('/api/plate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({undo:true})});
+     say('Plates back as they were.');setTimeout(()=>location.reload(),350);}
    catch(e){say(e.message);}},
- /* A weigh-in, typed on Body: one row, the date a recorded fact; the screen redraws and the
-    proposal Tonight carries is refreshed from the reply, so no reload is needed. */
+ async ackPlate(){
+   try{await api('/api/plate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ack:true})});
+     CFG.plate_step=null;render();}
+   catch(e){say(e.message);}},
+ /* A weigh-in, typed on Body: one row, the date a recorded fact. The screen redraws; when the
+    scale stepped the plate on it, the page is fetched again, scaled, and lands back here on the
+    line that says so. */
  async weigh(){const g=id=>document.getElementById(id);
    const w=g('wIn')?g('wIn').value.trim():'', d=g('wDate')?g('wDate').value.trim():'';
    if(!w){MSG='Type your weight first.';render();return;}
    try{const r=await api('/api/weigh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weight_lb:w,date:d})});
-     CFG.plate_proposal=r.proposal||null;BODY=null;MSG='';say('Weighed in: '+r.point.weight_lb+' lb, trend '+r.point.trend_lb+'.');}
+     if(r.stepped){returnTo({tab:'markers',mk:'body',at:'platecard'});say('Weighed in. The scale stepped the plate: about 5 percent '+(r.stepped.step<0?'smaller':'larger')+' from the next cook.');setTimeout(()=>location.reload(),600);return;}
+     BODY=null;MSG='';say('Weighed in: '+r.point.weight_lb+' lb, trend '+r.point.trend_lb+'.');}
    catch(e){MSG=e.message;}
    render();},
  /* Your target under Profile: About you saved the way first run saves it, then the page
@@ -508,7 +528,7 @@ window.act={
    catch(e){SED.msg=e.message;render();}},
  async addStore(){
    if(!SNEW.name.trim()){SNEW.msg='Give the store a name.';render();return;}
-   try{const r=await api('/api/stores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:SNEW.name,threshold:SNEW.threshold,cadence:SNEW.cadence,countdown:SNEW.countdown})});
+   try{const r=await api('/api/stores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:SNEW.name,threshold:SNEW.threshold,cadence:SNEW.cadence,countdown:SNEW.countdown,kind:SNEW.kind})});
      returnTo({store:r.key});say(SNEW.name.trim()+' added.');setTimeout(()=>location.reload(),350);}
    catch(e){SNEW.msg=e.message;render();}},
  async removeStore(sk){
@@ -613,6 +633,9 @@ window.act={
  closeNote(){NOTE=null;render();},
  /* the guide: Skip puts the step it is showing behind you for good; the line finds the control */
  guideSkip(){const p=guidePlan(guideView());if(p&&p.key&&!S.seen.includes(p.key))S.seen.push(p.key);persist();guideSync();},
+ /* Show me around again: every step forgotten, the tour on, Tonight first. The guide was once
+    shown once and never again; an app is not learnt in one pass. */
+ guideAgain(){S.seen=S.seen.filter(k=>!GUIDE.some(s=>s.key===k));S.guide=true;S.tour=true;persist();tab='tonight';MKVIEW='overview';render();window.scrollTo({top:0});},
  guideFind(){if(GTARGET&&GTARGET.scrollIntoView)GTARGET.scrollIntoView({block:'center',behavior:'smooth'});},
  notNow(){if(!S.seen.includes('report_nudge'))S.seen.push('report_nudge');persist();render();},
  closeFlip(){const g=document.getElementById('gate');g.innerHTML='';},
@@ -693,14 +716,19 @@ function gateRail(sw){
    card on Tonight and on Body, so the two cannot say different things about the same step. --- */
 const slopeWords=s=>(s<0?'down ':'up ')+Math.abs(s).toFixed(2)+' lb';
 const bandWords=b=>b[1]<=0?'down '+Math.abs(b[1]).toFixed(2)+' to '+Math.abs(b[0]).toFixed(2)+' lb':b[0]>=0?'up '+b[0].toFixed(2)+' to '+b[1].toFixed(2)+' lb':'within '+b[1].toFixed(2)+' lb either way';
+/* The scale stepped the plate: one card on Tonight and on Body, the same function, saying what
+   changed in food words, with Got it and Undo. It replaced a proposal with a Do it button: the
+   step is 5 percent at most once in four weeks after three weeks of weigh-ins, small enough to
+   apply itself, and a line with Undo is not silence. */
 function plateCard(p){
-  const nxt=Math.round(Math.abs(1-p.plate_next)*100), dir=p.step<0?'smaller':'larger';
-  const line=p.plate_next===1?'Plates go back to the recipes as written from the next cook.'
-    :'Plates get about 5 percent '+dir+' from the next cook: about '+nxt+' percent '+(p.plate_next<1?'smaller':'larger')+' than written.';
+  const pct=Math.round(Math.abs(1-p.plate)*100), dir=p.plate<p.plate_prev?'smaller':'larger';
+  const line=p.plate===1?'Plates are back to the recipes as written, from the next cook.'
+    :'Plates are about 5 percent '+dir+' from the next cook: about '+pct+' percent '+(p.plate<1?'smaller':'larger')+' than written.';
   return '<section class="card card--tint arrive" data-family="sprout" id="platecard"><span class="t-head" style="display:block">'+esc(line)+'</span>'+
-    '<p class="t-note" style="margin-top:var(--s1)">The scale says so: over your last '+p.points+' weigh-ins the trend moved '+esc(slopeWords(p.slope))+' a week, and your goal expects '+esc(bandWords(p.expected))+'. '+
-    'Nothing changes until you say so. The stock you own is eaten at the new size; nothing is rebought.</p>'+
-    '<button class="btn btn--sm btn--ink" type="button" data-fk="plate" onclick="act.stepPlate('+p.plate_next+')" style="margin-top:var(--s3)">Do it</button></section>';
+    '<p class="t-note" style="margin-top:var(--s1)">The scale said so: over three weeks of weigh-ins the trend sat '+(dir==='smaller'?'above':'below')+' the band your goal expects. '+
+    'The stock you own is eaten at the new size; nothing is rebought. Not what you wanted? Undo puts the old plate back.</p>'+
+    '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn btn--sm btn--ink" type="button" data-fk="plateok" onclick="act.ackPlate()">Got it</button>'+
+    '<button class="btn btn--sm" type="button" data-fk="plateundo" onclick="act.undoPlate()">Undo</button></div></section>';
 }
 
 /* ---- the invitation: once, while no report is on file, dismissable, never a nag. Food words
@@ -756,83 +784,96 @@ function settleInfo(draw,before,how){
   rows.sort((a,b)=>((a.hot<0)-(b.hot<0))||(a.hot>=0&&b.hot>=0?a.hot-b.hot:0)||(b.share-a.share));
   return {cursor:S.cursor,meal:S.last?S.last.meal:mealAt(-1).name,how:how,rows:rows,next:mealAt(0).name,gate:gateLine()};
 }
-/* a number that changed rolls to its new value */
+/* a number that changed rolls to its new value: an odometer, every numeral a column that slides
+   from the old digit to the new; a decimal point stays put */
 function roll(el,from,to,dur){
-  const dec=(Math.abs(from-Math.round(from))>1e-6||Math.abs(to-Math.round(to))>1e-6)?1:0, t0=performance.now();
-  const f=()=>{const k=Math.min(1,(performance.now()-t0)/dur), e=1-Math.pow(1-k,3);
-    el.textContent=(from+(to-from)*e).toFixed(dec);
-    if(k<1&&LG.on)requestAnimationFrame(f);else el.textContent=to.toFixed(dec);};
-  requestAnimationFrame(f);
+  const dec=(Math.abs(from-Math.round(from))>1e-6||Math.abs(to-Math.round(to))>1e-6)?1:0;
+  const a=from.toFixed(dec), b=to.toFixed(dec), n=Math.max(a.length,b.length), A=a.padStart(n,' '), B=b.padStart(n,' ');
+  const G='0123456789 ', at=c=>{const i=G.indexOf(c);return i<0?10:i;};
+  let h='';
+  for(let i=0;i<n;i++){const cb=B[i];
+    if(cb==='.'){h+='<b>.</b>';continue;}
+    h+='<i data-to="'+at(cb)+'" style="transform:translateY(-'+(at(A[i])*100/11).toFixed(3)+'%);transition-duration:'+dur+'ms">'+G.split('').map(g=>'<span>'+(g===' '?'&nbsp;':g)+'</span>').join('')+'</i>';}
+  el.className='odo';el.innerHTML=h;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>{el.querySelectorAll('i').forEach(c=>{c.style.transform='translateY(-'+(+c.dataset.to*100/11).toFixed(3)+'%)';});}));
 }
-/* the plate: a disc seen from above with tonight's food resting on it; at the release it tilts
-   toward you and the food slides off and falls, fading where the rows begin */
+/* the plate: the app's own motif with a rim, tipping toward you; what tonight used rests on it
+   as pieces in the colour of the zone each came from, slides off as it tips, and falls into its
+   row: the row catches the first piece with a pulse and its count rolls to what is left */
 function ledgerPlate(rows,release){
-  const c=document.querySelector('#ledger canvas'); if(!c)return;
-  const dpr=Math.min(window.devicePixelRatio||1,2), w=c.clientWidth||320, h=c.clientHeight||168;
-  c.width=Math.round(w*dpr); c.height=Math.round(h*dpr);
-  const x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0);
-  const cx=w/2, cy=h*0.5, R=Math.min(70,h*0.4);
-  const dots=[];
-  rows.forEach(r=>{const col=cssVar(ZCOL[r.zone]||'--clay'), n=Math.min(18,Math.max(3,Math.round(4+14*(r.share||0))));
-    for(let j=0;j<n;j++){const a=Math.random()*6.283, d=Math.sqrt(Math.random())*R*0.74;
-      dots.push({u:Math.cos(a)*d,v:Math.sin(a)*d,r:2.2+Math.random()*2.6,col:col,vx:0,vy:0,y:null,a:1,go:Math.random()*180});}});
-  const t0=performance.now();
+  const L=document.getElementById('ledger'), stage=L&&L.querySelector('.lp-stage'); if(!L||!stage)return;
+  const rowEls=L.querySelectorAll('.ledger-row'), vals=L.querySelectorAll('.ledger-row .odo');
+  const sx=stage.offsetLeft, sy=stage.offsetTop, w=stage.offsetWidth, h=stage.offsetHeight, cx=sx+w/2, cy=sy+h*0.5+6, R=68;
+  const pieces=[];
+  rows.forEach((r,i)=>{const col=cssVar(ZCOL[r.zone]||'--clay'), n=Math.min(7,Math.max(2,Math.round(2+5*(r.share||0)))), row=rowEls[i];
+    if(!row)return;
+    const ly=row.offsetTop+row.offsetHeight/2, lx=row.offsetLeft+row.offsetWidth-58;
+    for(let j=0;j<n;j++){const a=(i/rows.length)*6.283+(j/n)*2.1+0.4, d=18+Math.sqrt(Math.random())*R*0.62;
+      const el=document.createElement('i'); el.className='lpc'+(Math.random()<0.45?' round':''); el.style.setProperty('--pc',col);
+      const size=8+Math.random()*6; el.style.width=size+'px'; el.style.height=size+'px'; L.appendChild(el);
+      pieces.push({el,u:Math.cos(a)*d,v:Math.sin(a)*d,x:0,y:0,vx:0,vy:0,rot:Math.random()*360,spin:(Math.random()-0.5)*14,a:1,
+        go:release+i*110+j*28+Math.random()*60,lx,ly,row,land:false,i:i});}});
+  const t0=performance.now(), tilt0=500, tiltDur=820;
   const frame=()=>{
     const t=performance.now()-t0;
-    x.clearRect(0,0,w,h);
-    const k=Math.max(0,Math.min(1,(t-release)/560)), e=1-Math.pow(1-k,3), ry=1-0.7*e;
-    x.save(); x.translate(cx,cy);
-    x.beginPath(); x.ellipse(0,0,R,R*ry,0,0,6.283); x.fillStyle='rgba(255,255,255,.07)'; x.fill();
-    x.lineWidth=2; x.strokeStyle='rgba(255,255,255,.34)'; x.stroke();
-    x.beginPath(); x.ellipse(0,0,R*0.62,R*0.62*ry,0,0,6.283); x.lineWidth=1; x.strokeStyle='rgba(255,255,255,.14)'; x.stroke();
+    const k=Math.max(0,Math.min(1,(t-tilt0)/tiltDur)), e=1-Math.pow(1-k,3), th=e*64*Math.PI/180, cos=Math.cos(th);
     let live=0;
-    dots.forEach(p=>{
-      let px,py;
-      if(t<release+p.go){px=p.u;py=p.v*ry;}
+    pieces.forEach(p=>{
+      if(p.a<=0)return;
+      if(t<p.go){p.x=cx+p.u;p.y=cy+p.v*cos-e*22;}
       else{
-        if(p.y===null){p.y=p.v*ry;p.vx=(Math.random()-0.5)*0.8;p.vy=0.5+Math.random()*1.1;}
-        p.vy+=0.2; p.y+=p.vy; p.u+=p.vx; px=p.u; py=p.y;
-        if(py>h-cy-8)p.a-=0.09;
+        if(!p.vy){p.vy=1.4+Math.random()*1.4;p.vx=(Math.random()-0.5)*1.6;}
+        p.vy+=0.34;p.y+=p.vy;p.vx+=(p.lx-p.x)*0.012;p.x+=p.vx;p.rot+=p.spin;
+        if(p.y>=p.ly-6){
+          if(!p.land){p.land=true;
+            if(!p.row.dataset.caught){p.row.dataset.caught='1';p.row.style.setProperty('--pc',p.el.style.getPropertyValue('--pc'));p.row.classList.add('catch');
+              const b=vals[p.i]; if(b&&b.dataset.from!=null)roll(b,+b.dataset.from,+b.dataset.to,920);
+              if(navigator.vibrate)try{navigator.vibrate(8);}catch(e){}}}
+          p.a-=0.18;}
       }
-      if(p.a<=0)return; live++;
-      x.globalAlpha=Math.max(0,p.a); x.fillStyle=p.col; x.beginPath(); x.arc(px,py,p.r,0,6.283); x.fill(); x.globalAlpha=1;
+      live++;
+      p.el.style.transform='translate('+p.x.toFixed(1)+'px,'+p.y.toFixed(1)+'px) rotate('+p.rot.toFixed(0)+'deg)';
+      p.el.style.opacity=Math.max(0,p.a).toFixed(2);
     });
-    x.restore();
-    if(LG.on&&(live>0||t<release+600))LG.raf=requestAnimationFrame(frame);
+    if(LG.on&&(live>0||t<release+800))LG.raf=requestAnimationFrame(frame);
   };
   LG.raf=requestAnimationFrame(frame);
 }
 function ledgerHide(){
-  const L=document.getElementById('ledger'); if(!L||!LG.on)return;
+  const L=document.getElementById('ledger'), S0=document.getElementById('lscrim'); if(!L||!LG.on)return;
   LG.t.forEach(clearTimeout); LG.t=[]; if(LG.raf)cancelAnimationFrame(LG.raf); LG.raf=null; LG.on=false;
-  L.classList.remove('on'); L.onclick=null;
-  /* the new plate reads in as the sheet goes */
+  L.classList.remove('on'); if(S0)S0.classList.remove('on'); L.onclick=null;
+  /* the new plate reads in as the sheet goes: the hero flips to it */
   const h=document.getElementById('hero');
-  if(h){h.classList.add('settling');h.classList.add('punch');setTimeout(()=>{h.classList.remove('settling');h.classList.remove('punch');},1000);}
+  if(h){h.classList.add('settling');h.classList.add('flipin');setTimeout(()=>{h.classList.remove('settling');h.classList.remove('flipin');},1000);}
 }
 function fxSettle(info){
   if(RM.matches||!info)return;
   try{
-    const L=document.getElementById('ledger'); if(!L)return;
+    const L=document.getElementById('ledger'), S0=document.getElementById('lscrim'); if(!L)return;
     if(LG.on)ledgerHide();
     const at=(ms,fn)=>LG.t.push(setTimeout(fn,ms));
     const rows=info.rows.slice(0,5), more=info.rows.length-rows.length, q=v=>String(Math.round(v*10)/10);
-    const release=440, rowAt=i=>release+i*90;
-    L.innerHTML='<canvas></canvas>'+
+    const release=560, rowAt=i=>300+i*70, landAt=i=>release+i*110+420, nextAt=landAt(Math.max(0,rows.length-1))+300;
+    const m=S.last&&MEALS[S.last.meal_id]; L.dataset.family=m?famOf(m):'sprout';
+    L.innerHTML='<div class="lp-stage"><div class="lp"></div></div>'+
       '<div class="ledger-eye lrise" style="animation-delay:120ms">Meal '+(info.cursor%N||N)+' · cycle '+(Math.floor((info.cursor-1)/N)+1)+' · logged</div>'+
       '<div class="ledger-big lrise" style="animation-delay:160ms">'+esc(info.meal)+'</div>'+
       '<div class="ledger-how lrise" style="animation-delay:200ms">'+esc(info.how)+'</div>'+
       '<div class="ledger-rows">'+rows.map((r,i)=>{const u=r.unit==='each'?'':esc(r.unit)+' ';return '<div class="ledger-row lrise" style="animation-delay:'+rowAt(i)+'ms"><span><span class="ledger-name">'+esc(r.name)+'</span>'+
         '<span class="ledger-meta">'+esc(q(r.used))+' '+u+'tonight</span></span>'+
-        '<span class="ledger-val"><b>'+esc(q(r.before))+'</b><span class="u">'+u+'left</span></span></div>';}).join('')+
+        '<span class="ledger-val"><b class="odo" data-from="'+r.before+'" data-to="'+r.after+'">'+esc(q(r.before))+'</b><span class="u">'+u+'left</span></span></div>';}).join('')+
         (more>0?'<div class="ledger-row lrise" style="animation-delay:'+rowAt(rows.length)+'ms"><span class="ledger-meta">and '+more+' more thing'+(more===1?'':'s')+' from stock</span></div>':'')+
         (rows.length?'':'<div class="ledger-row lrise" style="animation-delay:'+release+'ms"><span class="ledger-meta">Nothing left the stock.</span></div>')+'</div>'+
-      '<div class="ledger-next lrise" style="animation-delay:'+(rowAt(rows.length)+320)+'ms"><span>Next up: <b>'+esc(info.next)+'</b>'+(info.gate?'<span class="ledger-meta">'+esc(info.gate)+'</span>':'')+'</span>'+icon('arrow')+'</div>';
-    L.classList.add('on'); LG.on=true; L.onclick=ledgerHide;
+      '<div class="ledger-next" id="lnext"><span>Next up: <b>'+esc(info.next)+'</b>'+(info.gate?'<span class="ledger-meta">'+esc(info.gate)+'</span>':'')+'</span>'+icon('arrow')+'</div>';
+    L.classList.add('on'); if(S0)S0.classList.add('on'); LG.on=true; L.onclick=ledgerHide;
     window.scrollTo({top:0,behavior:'smooth'});
     ledgerPlate(rows,release);
-    rows.forEach((r,i)=>at(rowAt(i)+140,()=>{const b=L.querySelectorAll('.ledger-row b')[i];if(b)roll(b,r.before,r.after,680);}));
-    at(info.hold?600000:2900,ledgerHide);
+    /* a row no piece reached still rolls, so the count is never left where it was */
+    rows.forEach((r,i)=>at(landAt(i)+380,()=>{const b=L.querySelectorAll('.ledger-row .odo')[i], row=L.querySelectorAll('.ledger-row')[i];
+      if(b&&row&&!row.dataset.caught){row.dataset.caught='1';roll(b,r.before,r.after,920);}}));
+    at(nextAt,()=>{const nx=document.getElementById('lnext');if(nx)nx.classList.add('wipe');});
+    at(info.hold?600000:Math.max(3800,nextAt+1500),ledgerHide);
   }catch(e){}
 }
 
@@ -1162,13 +1203,13 @@ function viewOverview(){
   const nmk=due.reduce((n,x)=>n+((x.members||[]).length||1),0), gap=s.last_draw&&p.suggested_draw?monthsBetween(s.last_draw,p.suggested_draw):null;
   aside+='<section class="card card--tint" data-family="clay" id="ladder"><div style="display:flex;align-items:center;gap:var(--s4)">'+
     '<span class="chip chip--lg chip--round" style="background:color-mix(in srgb,var(--surface) 60%,transparent)">'+icon('bag')+'</span>'+
-    '<div style="flex:1;min-width:0"><p class="t-head">Next draw'+(p.suggested_draw?' · '+esc(p.suggested_draw):p.draw?' · '+esc(p.draw):'')+'</p>'+
+    '<div style="flex:1;min-width:0"><p class="t-head">Next draw'+(p.suggested_draw?' · '+esc(p.suggested_draw):'')+'</p>'+
     '<p class="t-note" style="color:var(--clay-ink)">'+(s.last_draw?(gap!=null?'About '+gap+' month'+(gap===1?'':'s')+' after your last draw, '+esc(s.last_draw)+', from the retest rules. ':'')
       :'No draw on record yet; the first one sets the clock. ')+
       due.length+' panel'+(due.length===1?'':'s')+', '+nmk+' marker'+(nmk===1?'':'s')+', to add to the order'+(due.length?': '+esc(due.map(x=>x.name).join(', ')):'')+'.'+
     (cl.length?' Cost: '+esc(cl.join(', '))+'.':'')+'</p></div></div>';
   mon.forEach(m=>{aside+='<p class="t-note" style="margin-top:var(--s3);color:var(--ink)"><b>'+esc(m.item)+'</b> · '+(m.overdue?'overdue at this draw':'monitoring')+(m.due?', due '+esc(m.due):'')+'</p>';});
-  aside+='<button class="btn btn--sm" type="button" data-fk="godraw" style="margin-top:var(--s4);width:100%" onclick="act.mk(\'plan\')">See the draw plan '+icon('arrow')+'</button></section>';
+  aside+='<div class="btnrow" style="margin-top:var(--s4)">'+addReportBtn()+'<button class="btn btn--sm" type="button" data-fk="godraw" onclick="act.mk(\'plan\')">See the draw plan '+icon('arrow')+'</button></div></section>';
   aside+='<p class="t-note" style="text-align:center;padding:var(--s2) var(--s5) 0">Numbers, ranges and which rule fired. No interpretation, no diagnosis, and nothing here is medical advice.</p>';
 
   return '<div class="stack"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
@@ -1225,7 +1266,7 @@ function viewTonight(F){
 
   top+=noteCard();
   top+=reportCard();
-  if(CFG.plate_proposal)top+=plateCard(CFG.plate_proposal);
+  if(CFG.plate_step)top+=plateCard(CFG.plate_step);
   const X=(S.last&&S.last.kind==='extra'&&S.last.cursor===S.cursor)?S.last:null;
   if(X){
     /* the last log was something outside the plan: the one undo until the next log */
@@ -1353,8 +1394,8 @@ function nowCard(F){
     meta:'After tonight. Next up is '+esc(nx.name.toLowerCase())+'.'});
   if(LABS.draws===0&&!S.seen.includes('report_nudge'))rows.push({ico:'marker',fam:'plum',fk:'now:report',go:"act.tab('markers');act.mk('reports')",
     title:'Add a lab report',meta:'One from the last year is enough to move a night or two of dinner.'});
-  if(CFG.plate_proposal)rows.push({ico:'check',fam:'sprout',fk:'now:plate',go:"act.jumpK('platecard')",
-    title:'The scale proposes a plate step',meta:'Read it, then say yes or leave it.'});
+  if(CFG.plate_step)rows.push({ico:'check',fam:'sprout',fk:'now:plate',go:"act.jumpK('platecard')",
+    title:'The scale stepped the plate',meta:'Read what changed. Undo if you want it back.'});
   let h='<section class="card" id="now" aria-label="What to do now"><div class="split"><span class="t-label">Now</span>'+
     '<span class="mono" style="color:var(--ink-3)">'+(rows.length?rows.length+' thing'+(rows.length===1?'':'s')+' due':'in order')+'</span></div>';
   if(!rows.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">Nothing due but dinner.</p></section>';
@@ -1574,8 +1615,8 @@ function viewKitchen(F){
   /* what to buy, one card per store */
   let main='';
   SORDER.forEach(sk=>{const st=STORES[sk], items=runs[sk].items, first=items.length>0&&items.every(k=>(S.inv[k]||0)===0);
-    main+='<section class="card" id="k-store-'+esc(sk)+'"><div class="split"><span class="t-label">What to buy</span>'+
-      '<span class="mono" style="color:var(--ink-3)">'+esc(st.name)+(first?' · first run':'')+'</span></div>';
+    main+='<section class="card" id="k-store-'+esc(sk)+'"><div class="split"><span class="t-label">What to buy · '+esc(st.name)+'</span>'+
+      '<span class="mono" style="color:var(--ink-3)">'+storeMark(st)+(first?' · first run':'')+'</span></div>';
     if(TRIP[sk]){
       const n=TRIP[sk], rows=tripNeed(sk,n,F), opts=[3,5,7,10,14,21,28,42].filter(v=>v<=H);
       if(!opts.includes(n))opts.push(n);opts.sort((a,b)=>a-b);
@@ -1605,9 +1646,11 @@ function viewKitchen(F){
           '<span class="row__meta">'+(r?tripQty(r.units)+' '+esc(I[k].unit)+' · ':'')+esc(I[k].buy)+'</span>'+
           (a!==b?'<span class="row__note">'+b+' '+esc(I[k].unit)+' per '+N+' meals once the change lands, was '+a+'.</span>':'')+'</span>'+
           (first?'':d<=0?'<span class="pill" data-family="ember"><i class="dot"></i>out</span>':'<span class="pill pill--ghost">'+nMeals(d)+'</span>')+'</div>';});
-      main+='</div><div class="btnrow" style="margin-top:var(--s4)">'+
+      main+='</div>'+(first?'<p class="t-note" style="margin-top:var(--s3)">Your kitchen starts empty, so this list stocks it for '+nMeals(Math.max(st.threshold||0,FIRST_RUN))+'. Own most of it already? Say so and the list closes.</p>':'')+
+        '<div class="btnrow" style="margin-top:var(--s4)">'+
         '<button class="btn" type="button" data-fk="copy:'+esc(sk)+'" onclick="act.copy(\''+esc(sk)+'\')">Copy the list</button>'+
         '<button class="btn btn--ink" type="button" data-fk="restock:'+esc(sk)+'" onclick="act.restock(\''+esc(sk)+'\')">Bought it</button></div>'+
+        (first?'<button class="btn btn--quiet" type="button" data-fk="stocked" style="width:100%;margin-top:var(--s2)" onclick="act.stocked()">My kitchen is stocked already</button>':'')+
         '<button class="btn" type="button" data-fk="trip:'+esc(sk)+'" style="width:100%;margin-top:var(--s2)" onclick="act.tripOpen(\''+esc(sk)+'\')">Plan a trip</button>';
     }
     main+='</section>';});
@@ -1622,11 +1665,10 @@ function viewKitchen(F){
       const cls=down?'out':(d<=thr?'low':'');
       const left=d>=H?'deep, over '+H+' meals':d<=0?'out':nMeals(d)+' left';
       const note=down?'Eating down: the rotation no longer uses this, so it stays off the list'
-        :nostore?'Off every list: no store in play carries this'
-        :(d<=thr&&st)?'On the '+st.name+' list':'';
+        :nostore?'Off every list: no store in play carries this':'';
       main+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
-        '<span class="row__meta">'+q+' '+esc(I[k].unit)+' · '+left+'</span>'+gauge(pct,cls)+
-        (note?'<span class="row__note'+(cls==='low'||nostore?' row__note--hot':'')+'">'+esc(note)+'</span>':'')+'</span>'+
+        '<span class="row__meta">'+q+' '+esc(I[k].unit)+' · '+left+(st&&!down?' · '+storeMark(st)+(d<=thr?' <em class="onlist">on the list</em>':''):'')+'</span>'+gauge(pct,cls)+
+        (note?'<span class="row__note'+(nostore?' row__note--hot':'')+'">'+esc(note)+'</span>':'')+'</span>'+
         '<span class="step2">'+
         '<button class="iconbtn" type="button" data-fk="less:'+k+'" onclick="act.bump(\''+k+'\',-1)" aria-label="Less '+esc(I[k].name)+'">'+icon('minus')+'</button>'+
         '<button class="iconbtn" type="button" data-fk="more:'+k+'" onclick="act.bump(\''+k+'\',1)" aria-label="More '+esc(I[k].name)+'">'+icon('plus')+'</button>'+
@@ -1827,8 +1869,11 @@ function wireChart(root){
 }
 
 /* ---- the chip row: Markers' sub-views -------------------------------------------------- */
-const MKVIEWS=[['overview','All markers'],['trend','Full history'],['body','Body'],
-               ['plan','Next draw'],['reports','Add a report']];
+const MKVIEWS=[['overview','All markers'],['trend','Full history'],['body','Body'],['plan','Next draw']];
+/* Add a report is a task, not a view, so it is a button on the views that lead to it and not a
+   chip in the row: four views fit one row at phone width; five wrapped. The reports screen is
+   still MKVIEW 'reports', reached by this button, the Now card and the guide. */
+const addReportBtn=extra=>'<button class="btn btn--sm btn--ink" type="button" data-fk="mkadd" onclick="act.mk(\'reports\')"'+(extra||'')+'>Add a report '+icon('plus')+'</button>';
 function chips(){
   return '<div class="chips" role="tablist">'+MKVIEWS.map(([k,l])=>
     '<button type="button" role="tab" data-fk="mkv:'+k+'" aria-current="'+(MKVIEW===k)+'" onclick="act.mk(\''+k+'\')">'+l+'</button>').join('')+'</div>';
@@ -1908,7 +1953,7 @@ function verdictWords(v){
   if(v.state==='stepped_recently')return 'The trend moved '+s+' a week over '+n+' weigh-ins. The plate changed on '+v.since+', and the scale judges again four weeks after a change.';
   if(v.state==='on_track')return 'On track: the trend moved '+s+' a week over '+n+' weigh-ins, inside the '+band+' a week your goal expects.';
   if(v.state==='at_bound')return 'The trend moved '+s+' a week over '+n+' weigh-ins, outside the '+band+' your goal expects, and the plate is already as '+(v.step<0?'small':'large')+' as this plan goes.';
-  if(v.state==='propose')return 'Off track: the trend moved '+s+' a week over '+n+' weigh-ins; your goal expects '+band+' a week.';
+  if(v.state==='propose')return 'Off track: the trend moved '+s+' a week over '+n+' weigh-ins; your goal expects '+band+' a week. The plate steps at your next weigh-in.';
   return '';
 }
 function viewBody(){
@@ -1932,7 +1977,7 @@ function viewBody(){
     '<div class="field"><span>On</span><input type="date" id="wDate" data-fk="wdate" value="'+todayIso()+'"></div></div>'+
     '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn btn--ink" type="button" data-fk="weigh" onclick="act.weigh()">Log a weigh-in</button></div>'+
     (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
-  if(v.state==='propose')top+=plateCard({step:v.step,plate:v.plate,plate_next:v.plate_next,slope:v.slope,expected:v.expected,points:v.points,window_days:v.window_days,goal:v.goal});
+  if(CFG.plate_step)top+=plateCard(CFG.plate_step);
   let main='';
   if(a.kcal||a.protein_g||a.expenditure_kcal){
     main+='<section class="card"><div class="split"><span class="t-label">Intake</span><span class="mono" style="color:var(--ink-3)">from your food tracking app</span></div><div class="stats stats--2" style="margin-top:var(--s3)">'+
@@ -1961,10 +2006,11 @@ function viewPlan(){
   if(DRAW.error)return '<div class="stack"><section class="card a-hero">'+errBox(DRAW.error)+'</section></div>';
   const p=DRAW;
   let top='<section class="card" data-family="clay"><span class="t-label">Next draw</span>'+
-    '<div class="inline" style="margin-top:var(--s3)"><div class="field"><span>Planned draw date</span><input type="date" data-fk="plandate" id="planDate" value="'+esc(p.draw)+'"></div>'+
+    '<div class="inline" style="margin-top:var(--s3)"><div class="field"><span>Planned draw date</span><input type="date" data-fk="plandate" id="planDate" value="'+esc(p.suggested_draw||PLANQ.draw?p.draw:'')+'"></div>'+
     '<div class="field"><span>Routine cadence, months</span><input type="number" data-fk="plancad" id="planCad" value="'+esc(p.cadence)+'" min="1" max="60"></div>'+
     '<button class="btn btn--ink" type="button" data-fk="planbtn" onclick="act.plan()">Plan this draw</button></div>'+
-    '<p class="t-note" style="margin-top:var(--s3)">'+esc(p.draw)+' draw'+(p.draw===p.suggested_draw?', the next routine one':'')+' · '+esc(p.tier||'no')+' tier · age '+(p.age??'–')+' · '+p.n_targets+' markers judged against researched targets. Every line below shows the rule it used.</p></section>';
+    '<div class="btnrow" style="margin-top:var(--s3)">'+addReportBtn()+'</div>'+
+    '<p class="t-note" style="margin-top:var(--s3)">'+(p.suggested_draw||PLANQ.draw?esc(p.draw)+' draw'+(p.draw===p.suggested_draw?', the next routine one':''):'No draw on record yet: pick a date for the first one, or read the plan as of today')+' · '+esc(p.tier||'no')+' tier · age '+(p.age??'–')+' · '+p.n_targets+' markers judged against researched targets. Every line below shows the rule it used.</p></section>';
   if(p.context&&p.context.length)top+='<section class="card card--tint" data-family="clay"><span class="t-label">Personal context</span><div class="rows">'+p.context.map(c=>
     '<div class="row"><span class="row__body"><span class="row__title">'+esc(c.item)+'</span><span class="row__meta">'+esc(c.category)+(c.date?' · '+esc(c.date):'')+'</span></span>'+
     (c.status==='confirm'?'<span class="pill" data-family="ember"><i class="dot"></i>please confirm</span>':'')+'</div>').join('')+'</div></section>';
@@ -2234,13 +2280,13 @@ const STORY=[
   ['Tell it about you','Seven questions: how you eat, who eats, what you cook on, when you eat, where you shop, and your body. It builds a rotation of dinners and sizes the plates for you.'],
   ['Cook tonight, log it, shop when it says','Tonight is one plate, with what to take out and how it cooks. Log what you ate and the stock counts down; the list for each store opens when it is time to go. No calendar: time moves when you eat.'],
   ['Add a lab report, and dinner adjusts','Any lab\'s PDF, or the numbers typed from paper. The markers set a few nights of the rotation, one swap at a time, only once the food you already bought is eaten.'],
-  ['Weigh in, and the plate corrects itself','A few weigh-ins over three weeks tell it whether the plate is right. It proposes a step; you confirm.'],
+  ['Weigh in, and the plate corrects itself','A few weigh-ins over three weeks tell it whether the plate is right. It steps the plate and says so on Tonight; Undo if you want it back.'],
   ['Know the next draw before you pay for it','It says when the next draw is due, what to order and what it costs, and after the retest, what moved and what dinner did about it.'],
 ];
 function storyCard(opt){
   opt=opt||{};
   let h='<section class="card'+(opt.cls?' '+opt.cls:'')+'" id="'+(opt.id||'story')+'"><div class="split"><span class="t-label">How Plateside works</span><span class="mono" style="color:var(--ink-3)">in order</span></div>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Blood work into dinner. The labs are the engine underneath; the screens speak food.</p><ol class="steps">';
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">What to cook, what to buy, and when. Your weight goal sizes the plate; your blood work shapes the rotation underneath.</p><ol class="steps">';
   STORY.forEach(([t,d])=>{h+='<li><p><b>'+esc(t)+'.</b> '+esc(d)+'</p></li>';});
   return h+'</ol></section>';
 }
@@ -2281,10 +2327,11 @@ function targetLine(){
   if(miss.length)return 'Still needed: '+list(miss.map(k=>BODYLABEL[k]||k))+'. Then your target appears here.';
   if(!TGT)return 'Working it out…';
   if(TGT.error)return TGT.error;
-  const e=TGT.estimate||{};
+  const e=TGT.estimate||{}, k=TGT.kcal!=null?TGT.kcal:e.kcal;
   if(e.missing&&e.missing.length)return 'Still needed: '+list(e.missing.map(k=>BODYLABEL[k]||k))+'.';
-  let s='About '+e.kcal.toLocaleString()+' kcal and '+e.protein_g+' g protein a day'+(e.goal==='hold'?'.':e.goal==='lose'?', to lose '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.':', to gain '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.');
-  if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest this plan goes.';
+  let s='About '+k.toLocaleString()+' kcal and '+e.protein_g+' g protein a day'+(e.goal==='hold'?'.':e.goal==='lose'?', to lose '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.':', to gain '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.');
+  if(TGT.measured)s+=' The calories are what your tracking app measured you burn, less that, not a guess from your height and weight.';
+  else if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest this plan goes.';
   if(e.protein_clamped)s+=' Protein is held to '+e.protein_g+' g, the edge of the band the plan uses.';
   const p=TGT.plate;
   if(p&&p.ratio!=null){const pct=Math.round(Math.abs(1-p.plate)*100), dir=p.plate<1?'smaller':'larger';
@@ -2313,11 +2360,9 @@ function viewTargetCard(pr){
   bodySeed(pr||{});
   /* a complete body with no line yet: ask once, the way a keystroke would */
   if(!TGT&&!bodyMissing().length&&!TGTT)TGTT=setTimeout(()=>act.estimate('yt-'),0);
-  const d=(MK&&MK!=='none'&&MK.diet)?MK.diet:null, cal=d&&d.calories?d.calories:null;
-  return '<section class="card" id="yourtarget" data-family="plum"><div class="split"><span class="t-label">Your target</span>'+
-    (d?'<span class="mono" style="color:var(--ink-3)">'+Math.round(d.targets.kcal||0).toLocaleString()+' kcal · '+Math.round(d.targets.protein_g||0)+' g protein</span>':'')+'</div>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">The day\'s calories and protein, estimated from your body and your goal; the plate is sized from them. An estimate is within about 15 percent for any one person, and the scale corrects it over the weeks that follow. Change anything here and save.</p>'+
-    (cal&&cal.kcal_from_tracker?'<p class="t-note" style="margin-bottom:var(--s3)">While a food tracking app\'s export is on file, its own estimate of what you burn sets the calories instead: '+Math.round(cal.kcal_from_tracker).toLocaleString()+' kcal a day, from '+cal.days+' logged days.</p>':'')+
+  return '<section class="card" id="yourtarget" data-family="plum"><div class="split"><span class="t-label">Your target</span><span class="mono" style="color:var(--ink-3)">sizes your plates</span></div>'+
+    '<p class="t-head" style="display:block;margin-top:var(--s2)">'+esc(PLATE===1?'Plates as the recipes are written.':'Plates about '+Math.round(Math.abs(1-PLATE)*100)+' percent '+(PLATE<1?'smaller':'larger')+' than the recipes as written.')+'</p>'+
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">Sized from your body and your goal, and corrected by the scale over the weeks that follow. Change anything here and save; the plates follow.</p>'+
     fieldBody('yt-')+
     '<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="ytsave" onclick="act.saveTarget()">Save</button></div>'+
     (TMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(TMSG)+'</p>':'')+'</section>';
@@ -2333,40 +2378,80 @@ function viewFirstRun(){
   const occOn=(CFG.occasion_catalog||[]).filter(o=>o.rotation||o.id==='breakfast'||o.id==='lunch').map(o=>o.id);
   const regDefault=REGS.some(x=>x.id==='omnivore')?'omnivore':(REG?REG.id:'');
   const total=CFG.meals.length, fit=x=>total-(x.leaves_out_meals||[]).length;
-  let h='<div class="stack">';
+  /* the rail: one segment per card, lit as each card comes into view, the body card's only when
+     it is complete; and the bar that rises with the target line and the button once it is. The
+     rail sits before the stack, which is a grid of named areas that would place it last. */
+  let h='<div class="fr-rail" id="frrail" aria-hidden="true">'+FR_CARDS.map((c,i)=>'<i data-i="'+i+'"></i>').join('')+'<span id="frlabel">Set up your kitchen</span></div>';
+  h+='<div class="stack">';
   h+='<section class="card card--lit hero a-hero" data-family="sprout"><div class="hero-in">'+
     '<h1 class="mealname">Set up your kitchen</h1>'+
     '<p class="mealsub">Seven questions, then a rotation and a shopping list built for the way you eat, with plates sized for you.</p>'+
     '<p class="mealsub" style="margin-top:var(--s2)">'+esc(PRIVACY)+'</p>'+
     (LOCAL&&!standalone()?'<p class="mealsub" style="margin-top:var(--s2)">'+esc(INSTALL)+'</p>':'')+'</div></section>';
   h+=storyCard({cls:'a-main',id:'story-fr'});
-  h+='<section class="card"><span class="t-label">How you eat</span>'+
+  h+='<section class="card fr-card" id="fr-c0"><span class="t-label">How you eat</span>'+
     '<div class="formgrid" style="margin-top:var(--s2)"><div class="field wide"><span>Plan</span><select id="fr-regimen" data-fk="fr-regimen">'+
     REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===regDefault?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' of '+total+' meals fit</option>').join('')+
     '<option value=""'+(regDefault===''?' selected':'')+'>No plan: any meal in the catalog</option></select></div>'+
     '<div class="field"><span>People</span><input type="number" id="fr-people" data-fk="fr-people" min="1" max="100" step="1" value="'+esc(fmt(PORTIONS))+'"></div></div>'+
     '<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat. A meal or a cold option that has it leaves the pool.</p>'+fieldAvoid('fr-avoid-',AVOID)+'</section>';
-  h+='<section class="card"><span class="t-label">What you cook on</span>'+
+  h+='<section class="card fr-card" id="fr-c1"><span class="t-label">What you cook on</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A meal is written for each of these. Tick what your kitchen has.</p>'+
     fieldKitchen('fr-eq-',eqOn)+fieldTime('fr-time',20)+'</section>';
-  h+='<section class="card"><span class="t-label">When you eat</span>'+
+  h+='<section class="card fr-card" id="fr-c2"><span class="t-label">When you eat</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Dinner carries the recipe and is always on. The rest are quick options that rotate on their own.</p>'+
     fieldOccasions('fr-occ-',occOn)+'</section>';
-  h+='<section class="card"><span class="t-label">Where you shop</span>'+
+  h+='<section class="card fr-card" id="fr-c3"><span class="t-label">Where you shop</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Each store gets its own list and pack sizes. A store can be added later under You, top right.</p><div class="rows">'+
     SCAT.map(sk=>'<div class="row"><input class="tick" type="checkbox" id="fr-store-'+esc(sk)+'" data-fk="fr-store-'+esc(sk)+'"'+(SORDER.includes(sk)?' checked':'')+'>'+
       '<label class="row__body" for="fr-store-'+esc(sk)+'"><span class="row__title">'+esc(STORES[sk].name)+'</span><span class="row__meta">'+esc(String(STORES[sk].cadence||'').replace(/^\w/,c=>c.toUpperCase()))+'</span></label></div>').join('')+'</div></section>';
-  h+='<section class="card" data-family="plum"><span class="t-label">About you</span>'+
+  h+='<section class="card fr-card" id="fr-c4" data-family="plum"><span class="t-label">About you</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">Your plates are sized from this. It is an estimate, within about 15 percent for any one person; the scale corrects it over the weeks that follow.</p>'+
     fieldBody('fr-')+'</section>';
+  h+='<div class="fr-cta" id="frcta" hidden><span class="fr-cta-line" id="frctaline"></span><button class="btn btn-eat" type="button" data-fk="fr-save2" onclick="act.saveSetup()">Build my rotation</button></div>';
   h+='<section class="card"><div class="actions"><button class="btn btn-eat" type="button" data-fk="fr-save" onclick="act.saveSetup()">Build my rotation</button></div>'+
     (FRMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(FRMSG)+'</p>':'')+
-    (LOCAL?'<p class="t-note" style="margin-top:var(--s3)">Already using Plateside? Answer these once; a backup restores on the next screen.</p>':'')+'</section>';
+    '</section>';
+  if(LOCAL)h+='<section class="card"><span class="t-label">Already using Plateside?</span>'+
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">Bring everything across from a backup: your reports, your results, your stock and your log. Nothing is sent anywhere.</p>'+
+    '<div class="filepick"><input type="file" id="rst0" data-fk="rst0" accept=".plate,.bin,application/octet-stream">'+
+    '<button class="btn" type="button" data-fk="rst0btn" onclick="act.restore(\'rst0\')">Restore from a backup</button></div>'+
+    (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
   return h+'</div>';
+}
+/* the five cards of the interview, in order, and what the rail says beside each */
+const FR_CARDS=['How you eat','What you cook on','When you eat','Where you shop','About you'];
+let FRSEEN=[], FROBS=null;
+/* after the interview paints: the rail lights each card as it comes into view, About you only
+   once it is complete; the Build bar rises once the target line has something to say */
+function frSync(){
+  const rail=document.getElementById('frrail'); if(!rail){if(FROBS){FROBS.disconnect();FROBS=null;}return;}
+  const segs=rail.querySelectorAll('i'), label=document.getElementById('frlabel');
+  /* a sweep on every paint as well as the observer: a jump or a restored position can skip
+     whole cards without the observer ever seeing them (DESIGN.md, the reveal note) */
+  const sweep=()=>document.querySelectorAll('.fr-card').forEach(c=>{const r=c.getBoundingClientRect();
+    if(r.top<window.innerHeight*0.72&&r.bottom>0){const i=+c.id.slice(5);if(!FRSEEN.includes(i))FRSEEN.push(i);}});
+  const paint=()=>{
+    sweep();
+    const done=!bodyMissing().length;
+    segs.forEach((el,i)=>el.className=(i<4&&FRSEEN.includes(i))||(i===4&&done)?'lit':'');
+    const next=done?null:[0,1,2,3].find(i=>!FRSEEN.includes(i));
+    if(label)label.textContent=done?'Ready to build':next!=null?FR_CARDS[next]:'About you';
+    const cta=document.getElementById('frcta'), line=document.getElementById('frctaline');
+    if(cta){cta.hidden=!done;if(line)line.textContent=done?targetLine():'';}
+  };
+  if(!FROBS){
+    FROBS=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const i=+e.target.id.slice(5);if(!FRSEEN.includes(i))FRSEEN.push(i);}});paint();},{threshold:0.35});
+    document.querySelectorAll('.fr-card').forEach(c=>FROBS.observe(c));
+    document.getElementById('app').addEventListener('input',()=>paint(),{passive:true});
+    document.getElementById('app').addEventListener('change',()=>paint(),{passive:true});
+    let t=null;window.addEventListener('scroll',()=>{if(!t&&document.getElementById('frrail'))t=setTimeout(()=>{t=null;paint();},80);},{passive:true});
+  }
+  paint();
 }
 /* ---- STORES: which stores are in play and, where two carry an item, which one ----------- */
 let SPICK=null,SMSG='';                 /* the picker's unsaved choice: {shop:[...], picks:{}} */
-let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cadence:'',countdown:false,msg:''};   /* the editor's typed values, kept across a redraw */
+let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cadence:'',countdown:false,kind:'grocery',msg:''};   /* the editor's typed values, kept across a redraw */
 /* A save fetches the page again, because the catalog is resolved on the Mac and rides inside
    it; this remembers where he was so the reload lands him back on the editor. */
 function returnTo(extra){try{sessionStorage.setItem('lt:return',JSON.stringify(Object.assign({tab:'you',mk:'overview',at:'sed'},extra||{})));}catch(e){}}
@@ -2436,6 +2521,8 @@ function viewStoreEditor(){
     '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">A new store joins the stores in play. Then give it items above.</p>'+
     '<div class="formgrid">'+
     '<div class="field wide"><span>Name</span><input data-fk="snname" value="'+esc(SNEW.name)+'" oninput="act.snew(\'name\',this.value)" placeholder="e.g. Aldi"></div>'+
+    '<div class="field wide"><span>Kind of store</span><select data-fk="snkind" onchange="act.snew(\'kind\',this.value)">'+
+      [['grocery','Grocery store'],['warehouse','Warehouse club'],['market','Market or other']].map(([v,l])=>'<option value="'+v+'"'+(SNEW.kind===v?' selected':'')+'>'+l+'</option>').join('')+'</select></div>'+
     '<div class="field"><span>List opens at, meals of supply</span><input type="number" inputmode="numeric" min="1" data-fk="snthr" value="'+esc(SNEW.threshold)+'" oninput="act.snew(\'threshold\',this.value)" placeholder="21"></div>'+
     '<div class="field"><span>How often</span><input data-fk="sncad" value="'+esc(SNEW.cadence)+'" oninput="act.snew(\'cadence\',this.value)" placeholder="e.g. weekly"></div></div>'+
     '<div class="rows"><div class="row"><input class="tick" type="checkbox" id="sncd"'+(SNEW.countdown?' checked':'')+' data-fk="sncd" onchange="act.snew(\'countdown\',this.checked)">'+
@@ -2503,7 +2590,10 @@ function viewProfile(){
   main+=viewOccasionsCard();
   main+=viewStores();
   main+=viewStoreEditor();
-  let aside=data+lens;
+  let guide='<section class="card" id="guidecard"><div class="split"><span class="t-label">The guide</span><span class="mono" style="color:var(--ink-3)">'+(GUIDE.filter(s=>S.seen.includes(s.key)).length)+' of '+GUIDE.length+' steps seen</span></div>'+
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">The light that walks you through the loop: shop and Bought it, cook and Ate it all, add a report, weigh in, and what moved. Run it again any time; Skip is always one tap.</p>'+
+    '<div class="btnrow"><button class="btn btn--ink" type="button" data-fk="guideagain" onclick="act.guideAgain()">Show me around again</button></div></section>';
+  let aside=viewAppearance()+guide+data+lens;
   aside+='<section class="card" data-family="plum"><div class="split"><span class="t-label">Health history</span><span class="mono" style="color:var(--ink-3)">'+(h0.items||[]).length+' facts</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them.</p><div class="rows">';
   (h0.items||[]).forEach(x=>{aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
@@ -2543,33 +2633,36 @@ function viewProfile(){
    this block by its markers and run it in node against invented homes. */
 const GUIDE=[
   {key:'guide_shop',due:v=>v.empty,done:v=>!v.empty,hops:[
-    {when:v=>v.tab!=='kitchen',sel:'[data-fk="tab:kitchen"]',line:'Your first shopping list is on Kitchen.'},
-    {when:v=>true,sel:'[data-fk^="restock:"],[data-fk^="trip-bought:"]',line:'Shop this list. Back home, tap Bought it, and the stock starts counting down.'}]},
+    {when:v=>v.tab!=='kitchen',sel:'[data-fk="tab:kitchen"]',line:'Start on Kitchen. Your first shopping list is there.'},
+    {when:v=>true,sel:'[data-fk^="restock:"],[data-fk^="trip-bought:"]',line:'This is what to buy. Shop it, then tap Bought it here and the stock starts counting down.'}]},
   {key:'guide_log',due:v=>!v.empty&&v.cursor===0,done:v=>v.cursor>0,hops:[
-    {when:v=>v.tab!=='tonight',sel:'[data-fk="tab:tonight"]',line:'Tonight is the plate to cook.'},
-    {when:v=>true,sel:'[data-fk="eat"]',line:'Cook this. When you have eaten, tap Ate it all: the stock moves and the next plate reads in.'}]},
+    {when:v=>v.tab!=='tonight',sel:'[data-fk="tab:tonight"]',line:'Tonight shows the one plate to cook.'},
+    {when:v=>true,sel:'[data-fk="eat"]',line:'Cook this. Once you have eaten, tap Ate it all: the stock moves and the next plate reads in.'}]},
   {key:'guide_report',due:v=>v.cursor>0&&v.draws===0&&!v.declined,done:v=>v.draws>0||(v.tab==='markers'&&v.mk==='reports'),hops:[
-    {when:v=>v.tab==='tonight',sel:'[data-fk="addreport"]',line:'Have a lab report? Add it, and a night or two of dinner changes.'},
+    {when:v=>v.tab==='tonight',sel:'[data-fk="addreport"]',line:'Got a lab report? Add it here, and a night or two of dinner changes.'},
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Your lab reports live under Markers.'},
-    {when:v=>true,sel:'[data-fk="mkv:reports"]',line:'Add a report: a PDF from any lab, or the numbers typed from paper.'}]},
+    {when:v=>true,sel:'[data-fk="mkadd"]',line:'Tap Add a report: a PDF from any lab, or the numbers typed from paper.'}]},
   {key:'guide_weigh',due:v=>v.draws>0&&v.weighed!==true,done:v=>v.weighed===true,hops:[
-    {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Weigh in under Markers, and after three the plate corrects itself.'},
+    {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Weigh in under Markers. After three weigh-ins the plate corrects itself.'},
     {when:v=>v.mk!=='body',sel:'[data-fk="mkv:body"]',line:'Body holds the scale.'},
-    {when:v=>true,sel:'[data-fk="weigh"]',line:'Type your weight and log it. Three weigh-ins, and the plate corrects itself.'}]},
+    {when:v=>true,sel:'[data-fk="weigh"]',line:'Type your weight and tap Log a weigh-in. After three, the plate corrects itself.'}]},
   {key:'guide_moved',due:v=>v.draws>=2&&v.moved!==false,done:v=>false,arrive:true,hops:[
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'A second draw is on file. Markers says what moved.'},
-    {when:v=>v.mk!=='overview',sel:'[data-fk="mkv:overview"]',line:'All markers: since your last draw, what moved.'},
-    {when:v=>true,sel:'#since',line:'What moved between the two draws, then and now, and what dinner did about it.'}]}
+    {when:v=>v.mk!=='overview',sel:'[data-fk="mkv:overview"]',line:'All markers shows what moved since your last draw.'},
+    {when:v=>true,sel:'#since',line:'What moved between the two draws, and what dinner did about it.'}]}
 ];
 /* the first step not yet seen: {done:key} when the state already did it, else the hop to light */
 function guidePlan(v){
   if(!v||!v.on)return null;
   for(const s of GUIDE){
     if(v.seen.includes(s.key))continue;
-    if(s.done(v))return {done:s.key};
-    if(!s.due(v))continue;
+    /* a tour (Show me around again, under You) walks every step whatever the state has done */
+    if(!v.tour){
+      if(s.done(v))return {done:s.key};
+      if(!s.due(v))continue;
+    }
     const i=s.hops.findIndex(h=>h.when(v)), h=s.hops[i];
-    return {key:s.key,sel:h.sel,line:h.line,last:i===s.hops.length-1,arrive:!!s.arrive};
+    return {key:s.key,sel:h.sel,line:h.line,last:i===s.hops.length-1,arrive:!!s.arrive,n:GUIDE.indexOf(s),of:GUIDE.length};
   }
   return null;
 }
@@ -2577,7 +2670,7 @@ function guidePlan(v){
 let GTARGET=null, GKEY=null, GRAF=null;
 function guideView(){
   const live=liveItems();
-  return {on:!!S.guide,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,
+  return {on:!!S.guide,tour:!!S.tour,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,
     empty:live.length>0&&live.every(k=>(S.inv[k]||0)===0),
     draws:(LABS&&LABS.draws)||0,declined:S.seen.includes('report_nudge'),
     weighed:(BODY&&!BODY.error&&BODY.weigh)?(BODY.weigh.entries||0)>0:null,
@@ -2596,8 +2689,14 @@ function guideSync(){
     if(p.last&&p.arrive&&!S.seen.includes(p.key)){S.seen.push(p.key);persist();}   /* shown once: the light stays for this render */
     const moved=GKEY!==null&&GKEY!==p.key+p.sel, wasHidden=g.hidden;
     GTARGET=el;GKEY=p.key+p.sel;
-    document.getElementById('gline').textContent=p.line;
+    const line=document.getElementById('gline');
+    if(line.textContent!==p.line){line.textContent=p.line;line.classList.remove('swap');void line.offsetWidth;line.classList.add('swap');}
+    document.getElementById('gsteps').innerHTML=GUIDE.map((s,i)=>'<i class="'+(i<p.n?'done':i===p.n?'now':'')+'"></i>').join('');
     g.hidden=false;
+    /* the control comes to the person before the light lands on it: off screen, the page scrolls
+       it to the middle first, and the hole follows the scroll */
+    const r=el.getBoundingClientRect(), pad=8, off=r.bottom<pad||r.top>window.innerHeight-(pad+140)||(r.width===0&&r.height===0);
+    if(off&&!(r.width===0&&r.height===0)&&el.scrollIntoView)el.scrollIntoView({block:'center',behavior:RM.matches?'auto':'smooth'});
     guidePlace(moved&&!wasHidden);
     return;
   }
@@ -2612,21 +2711,42 @@ function guidePlace(glide){
   hole.style.top=(off?(r.bottom<0?-60:window.innerHeight+60):r.top-pad)+'px';
   hole.style.width=(off?0:r.width+2*pad)+'px';
   hole.style.height=(off?0:r.height+2*pad)+'px';
+  /* the pointer: from the panel's top edge to the nearest edge of the hole */
+  const path=document.getElementById('gpath'), dot=document.getElementById('gdot'), panel=document.querySelector('.g-panel');
+  if(!path||!dot||!panel)return;
+  if(off){path.setAttribute('d','');dot.setAttribute('r','0');return;}
+  const pr=panel.getBoundingClientRect(), hx=r.left+r.width/2, above=r.bottom+pad<pr.top;
+  const x0=Math.max(pr.left+28,Math.min(pr.right-28,hx)), y0=above?pr.top:pr.bottom;
+  const x1=hx, y1=above?r.bottom+pad+2:r.top-pad-2;
+  if(Math.abs(y1-y0)<28){path.setAttribute('d','');dot.setAttribute('r','0');return;}
+  const cy=(y0+y1)/2;
+  path.setAttribute('d','M'+x0.toFixed(1)+' '+y0.toFixed(1)+' C '+x0.toFixed(1)+' '+cy.toFixed(1)+', '+x1.toFixed(1)+' '+cy.toFixed(1)+', '+x1.toFixed(1)+' '+y1.toFixed(1));
+  dot.setAttribute('cx',x1.toFixed(1));dot.setAttribute('cy',y1.toFixed(1));dot.setAttribute('r','4');
 }
 ['scroll','resize'].forEach(ev=>window.addEventListener(ev,()=>{if(GTARGET&&!GRAF)GRAF=requestAnimationFrame(()=>{GRAF=null;guidePlace(false);});},{passive:true}));
 
-/* One masthead on every screen: the brand, the meal and cycle count once the app is set up,
-   and two round controls, You and the theme mark. The theme word is the control's label, so
-   the toggle that owns the stored choice is never removed, only drawn as a sun or a moon. */
-function mastHTML(full){
+/* Appearance, under You. Light is the identity and the app never follows the phone's setting:
+   dark is a choice a person makes here, and the control that owns that stored choice is never
+   removed, only moved. It stood in the masthead until Phase 8. */
+function viewAppearance(){
   const dark=document.documentElement.dataset.theme==='dark';
+  return '<section class="card" id="appearance"><div class="split"><span class="t-label">Appearance</span><span class="mono" style="color:var(--ink-3)">this device</span></div>'+
+    '<div class="seg" role="radiogroup" aria-label="Appearance" style="margin-top:var(--s3)">'+
+    '<button type="button" role="radio" data-fk="theme:light" aria-checked="'+(!dark)+'" onclick="if(document.documentElement.dataset.theme===\'dark\')act.theme()">'+icon('sun')+'Light</button>'+
+    '<button type="button" role="radio" data-fk="theme:dark" aria-checked="'+dark+'" onclick="if(document.documentElement.dataset.theme!==\'dark\')act.theme()">'+icon('moon')+'Dark</button></div>'+
+    '<p class="t-note" style="margin-top:var(--s3)">Light unless you choose dark. The choice stays on this device and never follows the phone\'s own setting.</p></section>';
+}
+/* One masthead on every screen: the brand, the meal and cycle count once the app is set up,
+   and one round control, You. The theme choice lives under You (viewAppearance), so the
+   control that owns the stored choice is never removed, only moved. */
+function mastHTML(full){
   return '<div class="mast-r"><span class="brand">PLATESIDE</span>'+
     (full?'<span class="folio">MEAL '+(S.cursor+1)+' · CYCLE '+(Math.floor(S.cursor/N)+1)+'</span>':'<span></span>')+
     '<span class="mast-ctl">'+
     (full?'<button class="tog" type="button" data-fk="you" onclick="act.you()" aria-label="You: your target, how you eat, your kitchen, your stores and your data"'+(tab==='you'?' aria-current="true"':'')+'>'+icon('you')+'</button>':'')+
-    '<button class="tog" type="button" data-fk="theme" onclick="act.theme()" aria-label="'+(dark?'Dark. Switch to light mode':'Light. Switch to dark mode')+'">'+icon(dark?'moon':'sun')+'</button>'+
     '</span></div>';
 }
+
 /* ---- the one render -------------------------------------------------------- */
 function render(){
   if(PRESSED){PRESSED.classList.remove('pressed');PRESSED=null;}
@@ -2634,28 +2754,15 @@ function render(){
     document.getElementById('app').innerHTML=viewFirstRun();
     document.getElementById('nav').innerHTML='';
     document.getElementById('mast').innerHTML=mastHTML(false);
-    PAINTED=null;ENTER=null;JUST=null;guideSync();
+    PAINTED=null;ENTER=null;JUST=null;guideSync();frSync();
     return;
   }
   if(!S.init){
-    document.getElementById('app').innerHTML='<div class="stack">'+
-      '<section class="card card--lit hero a-hero" data-family="sprout"><div class="hero-in">'+
-      '<h1 class="mealname">What is in your kitchen right now?</h1>'+
-      '<p class="mealsub">'+N+' meals on a rotation, three plate shapes. No calendar: time only moves when you '+
-      'log a meal, so set up today and shop whenever.</p></div></section>'+
-      '<section class="card a-main"><div class="actions">'+
-      '<button class="btn btn-eat" onclick="act.begin(true)">My kitchen is stocked</button>'+
-      '<button class="btn" onclick="act.begin(false)">Starting from scratch</button></div>'+
-      '<p class="t-note" style="margin-top:var(--s3)">Starting from scratch builds the full first run. Already own '+
-      'some of it? Bump those on Kitchen and the list shrinks.</p></section>'+
-      (LOCAL?'<section class="card a-aside"><span class="t-label">Already using Plateside?</span>'+
-      '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">Bring everything across from a backup: your reports, your results, your stock and your log. Nothing is sent anywhere.</p>'+
-      '<div class="filepick"><input type="file" id="rst0" data-fk="rst0" accept=".plate,.bin,application/octet-stream">'+
-      '<button class="btn" type="button" data-fk="rst0btn" onclick="act.restore(\'rst0\')">Restore from a backup</button></div>'+
-      (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>':'')+'</div>';
-    document.getElementById('nav').innerHTML='';
-    document.getElementById('mast').innerHTML=mastHTML(false);
-    PAINTED=null;ENTER=null;JUST=null;guideSync();
+    /* Straight from the interview to the first list: the stock question that stood here asked
+       a stranger to choose between a loud button they should not press and the one they
+       should. An empty kitchen is the honest start; "My kitchen is stocked" is a quiet button
+       on the first list's card for the person who already owns a pack of everything. */
+    act.begin(false);
     return;
   }
 
@@ -2713,7 +2820,7 @@ function loadState(v){
   try{const s=JSON.parse(v);S={inv:{...EMPTY,...(s.inv||{})},cursor:s.cursor||0,checked:s.checked||[],
     order:normOrder(s.order),off:s.off||{},flav:s.flav||[],init:s.init||false,
     pending:(s.pending&&typeof s.pending==='object')?s.pending:{},applied:Array.isArray(s.applied)?s.applied:[],
-    gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],guide:!!s.guide,
+    gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],guide:!!s.guide,tour:!!s.tour,
     reset_at:s.reset_at||0,setup:!!s.setup||!!s.init,last:(s.last&&typeof s.last==='object'&&Array.isArray(s.last.order))?s.last:null};return true;}catch(e){return false;}
 }
 /* The other device logged a meal or changed stock: take its copy and redraw. */
