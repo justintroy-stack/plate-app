@@ -13,7 +13,7 @@
 import { readRows } from './csv.js';
 import { ConfigError, lower, orEmpty, pyFloat, pyReprStr, pyRound, pySorted, strip } from './py.js';
 import { daysBetween, parseIso } from './pydate.js';
-import { COUNT_TAGS, leavesOut, loadFor, loadRegimens, numstr, regimenFromDiet } from './plate_config.js';
+import { COUNT_TAGS, COUNT_WORDS, TARGET_WORDS, leavesOut, loadFor, loadRegimens, numstr, regimenFromDiet } from './plate_config.js';
 import { ageOn, loadPolicy, loadProfile } from './policy.js';
 import { plateFor } from './rotation.js';
 import { req } from './pyx.js';
@@ -267,7 +267,12 @@ export function rulesRead(rules, registry, policy, regimen = null) {
       out.push(e);
     }
     if (!e.conditions.includes(r.condition)) e.conditions.push(r.condition);
-    if (!e.targets.includes(r.target)) e.targets.push(r.target);
+    const t = r.target;
+    // a count whose food the plan leaves out, or a target the plan does not hold, is nothing a
+    // report can move here: the marker is still read and charted, with nothing after "moves"
+    if (regimen && has(COUNT_TAGS, t) && leavesOut([COUNT_TAGS[t]], regimen).length) continue;
+    if (((regimen && regimen.unheld) || []).includes(t)) continue;
+    if (!e.targets.includes(t)) e.targets.push(t);
   }
   return out;
 }
@@ -284,10 +289,14 @@ export function buildDiet(home, store, registry) {
   for (const k of NUMERIC) if (diet[k]) targets[k] = pyFloat(diet[k]);
   const rid = regimenFromDiet(diet);
   const regimen = loadRegimens(home).find(r => r.id === rid) || null;
+  let unheld = [];
   if (regimen) {
     for (const k of Object.keys(COUNT_TAGS)) {
       if (regimen[k] != null) targets[k] = pyFloat(regimen[k]);
     }
+    // a target the plan does not hold (regimens.csv unheld): not a target here, not on the card
+    unheld = (regimen.unheld || []).filter(k => has(targets, k));
+    for (const k of unheld) delete targets[k];
   }
   const baseline = Object.assign({}, targets);
   const fired = [], notes = [];
@@ -305,7 +314,7 @@ export function buildDiet(home, store, registry) {
       continue;
     }
     const key = rule.target;
-    if (!has(targets, key)) continue;
+    if (!has(targets, key) && !unheld.includes(key)) continue;
     if (regimen && (regimen.unmoved_by || []).includes(m)) {
       // the plan is unmoved by this marker: the food rule stands down, so dinner stays what the plan chose
       entry.target = key;
@@ -320,8 +329,17 @@ export function buildDiet(home, store, registry) {
       // the food behind this count is not on the regimen, so the rule has nothing to move
       entry.target = key;
       entry.not_applicable = true;
-      entry.note = 'Not applicable: the ' + lower(req(regimen, 'name')) + ' plan leaves out ' + COUNT_TAGS[key] +
-                   ', so this rule does not move the count.';
+      entry.note = 'Not applicable: there is no ' + COUNT_WORDS[key] + ' night on the ' + lower(req(regimen, 'name')) +
+                   ' plan to trade, so dinner stays.';
+      notes.push(entry);
+      continue;
+    }
+    if (unheld.includes(key)) {
+      // the plan does not hold this target at all, so there is no number for the rule to move
+      entry.target = key;
+      entry.not_applicable = true;
+      entry.note = 'Not applicable: ' + (has(TARGET_WORDS, key) ? TARGET_WORDS[key] : key) + ' is not a target on the ' +
+                   lower(req(regimen, 'name')) + ' plan, so nothing moves.';
       notes.push(entry);
       continue;
     }
@@ -341,6 +359,6 @@ export function buildDiet(home, store, registry) {
   for (const [k, v] of Object.entries(diet)) if (!NUMERIC.includes(k)) constraints[k] = v;
   const outStates = {};
   for (const [m, s] of Object.entries(states)) if (s.latest === 'above' || s.latest === 'below') outStates[m] = s;
-  return { lens, constraints, regimen, baseline, targets, adjustments: fired, notes, calories: cal, states: outStates,
+  return { lens, constraints, regimen, baseline, targets, unheld, adjustments: fired, notes, calories: cal, states: outStates,
            reads: rulesRead(rules, registry, loadPolicy(home), regimen) };
 }

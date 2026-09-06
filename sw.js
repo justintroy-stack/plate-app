@@ -2,7 +2,7 @@
    Built by labtrack web build; the version is a hash of every file in the shell, so a new
    build is a new cache and the old one is dropped. Nothing personal is ever cached: the data
    lives in IndexedDB and the /api/ calls never leave the page. */
-const VERSION = "fe1461bbf103";
+const VERSION = "143d52f6d0b0";
 const CACHE = 'plate-web-' + VERSION;
 const ASSETS = ["index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png", "vendor/pdfjs/pdf.min.mjs", "vendor/pdfjs/pdf.worker.min.mjs", "fonts/plate-sans.woff2", "fonts/plate-mono.woff2", "fonts/plate-italic.woff2", "plate/api.js", "plate/app.js", "plate/backup.js", "plate/body.js", "plate/boot.js", "plate/crmath.js", "plate/csv.js", "plate/defaults.js", "plate/derived.js", "plate/diet.js", "plate/difflib.js", "plate/explain.js", "plate/fs.js", "plate/generic.js", "plate/history.js", "plate/home.js", "plate/ingest.js", "plate/markers.js", "plate/parsers.js", "plate/pdftext.js", "plate/planner.js", "plate/plate.js", "plate/plate_config.js", "plate/policy.js", "plate/py.js", "plate/pydate.js", "plate/pyexpr.js", "plate/pyx.js", "plate/quest.js", "plate/ranges.js", "plate/rotation.js", "plate/seeds.js", "plate/sha256.js", "plate/store.js", "plate/targets.js", "plate/tracker.js", "plate/build.js"];
 const here = (p) => new URL(p, self.registration.scope).pathname;

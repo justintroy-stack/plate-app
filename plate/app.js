@@ -101,13 +101,37 @@ const OCC=CFG.occasions||[{id:'dinner',name:'Dinner',rotation:true}], ROT=(OCC.f
 const occName=id=>{const o=OCC.find(x=>x.id===id);return o?o.name:id;};
 const occPortions=id=>{const o=OCC.find(x=>x.id===id);return o&&o.portions?o.portions:PORTIONS;};
 const planName=()=>REG?REG.name.toLowerCase():'chosen';
+/* What a report can do on this plan, said the same way everywhere a report is invited. On a plan
+   unmoved by the lipid markers (regimens.csv unmoved_by) a report is charted and dinner stays; the
+   promise "add it and dinner adjusts" was printed on six surfaces and was false there. */
+const planStays=()=>!!(REG&&(REG.unmoved_by||[]).length);
+const Plan=()=>REG?REG.name:'your plan';
+function reportLine(kind){
+  const stays=planStays();
+  return {head:stays?'Have a lab report? Add it and the numbers are charted.':'Have a lab report? Add it and dinner adjusts.',
+    head2:stays?'Add a lab report and the numbers are charted.':'Add a lab report and dinner adjusts.',
+    note:stays?'One report from the last year is enough. On '+Plan()+' a report is charted and dinner stays, as the plan asks.':'One report from the last year is enough to move a night or two of the rotation.',
+    note2:stays?'One report from the last year is enough. On '+Plan()+' a report is charted and dinner stays, as the plan asks. ':'One report from the last year is enough: several of the food rules fire on a single draw and move a night or two of the rotation. ',
+    now:stays?'One from the last year is enough. On '+Plan()+' the numbers are charted and dinner stays.':'One from the last year is enough to move a night or two of dinner.',
+    did:stays?'and what dinner did about it, which on '+Plan()+' is nothing, as the plan asks':'and what dinner did about it',
+    story:stays?['Add a lab report, and the numbers are charted','Any lab\'s PDF, or the numbers typed from paper. On '+Plan()+' a report is charted and dinner stays, as the plan asks; the added-sugar cap is the one number it can still tighten.']
+               :['Add a lab report, and dinner adjusts','Any lab\'s PDF, or the numbers typed from paper. The markers set a few nights of the rotation, one swap at a time, only once the food you already bought is eaten.'],
+    lens:stays?', except on '+Plan()+', where a report is charted and dinner stays':''}[kind];
+}
 /* a plan in one line for the interview: its own note (which says what it is unmoved by) and
    what it cannot fill from the catalog, said before it is chosen (plate_config's plan_gaps) */
-const planLine=r=>!r?'Any meal in the catalog.':(r.note||'')+((r.gaps||[]).length?' Not a whole day yet: '+r.gaps.join('; ')+'.':'');
+const asksLine=r=>{if(!r)return '';const ks=COUNT_KEYS.filter(([k])=>r[k]!=null&&r[k]>0);if(!ks.length)return '';
+  const one=ks.length===1&&r[ks[0][0]]===1;return ' Asks for '+list(ks.map(([k,w])=>fmt(r[k])+' '+w))+' night'+(one?'':'s')+' per cycle.';};
+function planLine(r,avoid){
+  let s=(!r?'Any meal in the catalog.':(r.note||''))+asksLine(r)+(r&&(r.gaps||[]).length?' Not a whole day yet: '+r.gaps.join('; ')+'.':'');
+  const av=(avoid||[]).filter(t=>chipsFor(r).includes(t));if(!av.length)return s;
+  const fit=planFit(r,av).length, g=planGaps(r,av);
+  return s+' With '+tagWords(av)+' left out: '+(fit?fit+' dinner'+(fit===1?'':'s')+(g.length?'; '+g.join('; '):''):'nothing in the catalog fits, so leave something in or pick another plan')+'.';
+}
 /* how many more times a meal or an option the plan leaves out comes round before the stock
    behind it is gone: the smallest whole count over what it uses, the protein the labs gate a
    meal on, the items the plan leaves out for a cold option; null when there is nothing to count */
-function staysFor(x){const keys=x.protein_item?[x.protein_item]:(x.excluded_items&&x.excluded_items.length)?x.excluded_items:Object.keys(x.uses||{});let n=null;
+function staysFor(x){const keys=(x.excluded_items&&x.excluded_items.length)?x.excluded_items:x.protein_item?[x.protein_item]:Object.keys(x.uses||{});let n=null;
   keys.forEach(k=>{const u=(x.uses||{})[k];if(!u)return;const t=Math.floor((S.inv[k]||0)/u);if(n==null||t<n)n=t;});return n;}
 const staysLine=x=>{const n=staysFor(x);return n===0?'The stock it was eating is gone, so it leaves at the next log.':
   'It stays until the stock it was eating is gone'+(n==null?'':', about '+n+' more time'+(n===1?'':'s'))+'.';};
@@ -137,7 +161,7 @@ const unitOf=(k,v)=>{const u=I[k].unit;if(!u||u==='each')return '';
   return (v===1&&u.length>1&&u.slice(-1)==='s'?u.slice(0,-1):u)+' ';};
 const qty=u=>Object.entries(u||{}).filter(([k,v])=>v!=null&&I[k]).map(([k,v])=>
   fmt(v)+' '+unitOf(k,v)+I[k].name.toLowerCase()).join(', ');
-const notOn=x=>{const av=(x.excluded||[]).filter(t=>AVOID.includes(t));return av.length?'Has '+list(av.map(t=>TAGWORD[t]||t))+', which you leave out.':'Not on the '+planName()+' plan: has '+list(x.excluded||[])+'.';};
+const notOn=x=>{const av=(x.excluded||[]).filter(t=>AVOID.includes(t));return av.length?'Has '+tagWords(av)+', which you leave out.':'Not on the '+planName()+' plan: has '+tagWords(x.excluded||[])+'.';};
 const PLAN=CFG.plan||null, SWAPS=PLAN?PLAN.swaps:[], SWAP={};SWAPS.forEach(s=>SWAP[s.key]=s);
 const FULL={},EMPTY={};IORDER.forEach(k=>{FULL[k]=I[k].pack;EMPTY[k]=0;});
 
@@ -164,7 +188,10 @@ function persist(){store.set('plate:v8',JSON.stringify(S)).then(ok=>{if(!ok)say(
 /* ---- rotation lookups */
 const posAt=d=>(S.cursor+d)%N;
 const mealAt=d=>MEALS[S.order[posAt(d)]]||MEALS[BASE[posAt(d)]];
-function kitFor(r,d){if(!r||!r.kits||!r.kits.length)return null;return KITS[r.kits[Math.floor((S.cursor+d)/N)%r.kits.length]]||null;}
+/* the kit tonight: the meal's kits, less any the plan or the chips leave out (a kit is made of
+   something too: butter, a sauce, a spice), rotating one step per cycle over what stays */
+function kitsOf(r){return(r&&r.kits?r.kits:[]).filter(k=>KITS[k]&&!(KITS[k].excluded&&KITS[k].excluded.length));}
+function kitFor(r,d){const ks=kitsOf(r);if(!ks.length)return null;return KITS[ks[Math.floor((S.cursor+d)/N)%ks.length]]||null;}
 const kitAt=d=>kitFor(mealAt(d),d);
 /* A cold option the plan leaves out stays in rotation only while the stock behind it lasts:
    the depletion rule, kept whole, so a switch never strands a tub of yogurt. A slot with no
@@ -177,10 +204,16 @@ function coldTot(d,occ){const c=coldAt(d,occ);return{c:c.reduce((a,x)=>a+x.kcal,
 
 /* What the log about to be tapped will actually take out of stock. Both log paths use it,
    so what the press previews and what the log does cannot drift apart. */
+/* What tonight's plate actually takes out, item by item: the recipe at the plate, or the amount
+   the person set on Tonight (a 1.25 plate says 1.25 lb; the pack was 1 lb; the log should take
+   1 lb). Keyed to the cursor and the meal, so a trade or a log makes it inert on its own. */
+let USED={cursor:-1,meal:'',amt:{}};
+const usedAmt=(m,k)=>(USED.cursor===S.cursor&&USED.meal===m.id&&USED.amt[k]!=null)?USED.amt[k]:m.uses[k];
+function plateDraw(m){const d={};for(const k in m.uses){const v=usedAmt(m,k);if(v!=null)d[k]=v;}return d;}
 function previewDraw(){
   const draw={};
   const hot=partial?pOven:true;
-  if(hot){const m=activeMeal();for(const k in m.uses)draw[k]=(draw[k]||0)+m.uses[k];}
+  if(hot){const m=activeMeal(),pd=plateDraw(m);for(const k in pd)draw[k]=(draw[k]||0)+pd[k];}
   coldAt(0).forEach(c=>{if(!partial||S.checked.includes(c.id))for(const k in c.uses)draw[k]=(draw[k]||0)+c.uses[k];});
   return draw;
 }
@@ -315,6 +348,30 @@ function extraOptions(){
   SLOTS.forEach(sl=>(liveOpts(sl)||[]).forEach((o,i)=>out.push({key:sl.id+'/'+i,label:o.label,kcal:o.kcal,protein_g:o.protein_g,uses:o.uses,slot:sl.name})));
   return out;
 }
+/* ---- the plan's rule, on the page: what a plan and the chips leave out, and what that costs,
+   said before Save. The same three lines as plate_config.leaves_out and the same phrases as
+   plan_gaps, pinned equal to the engine by test on every plan and chip combination; the
+   picker needs them live, because the chips change under a person's thumb. */
+const shortName=n=>String(n||'').split(' — ')[0];
+function leavesOut(tags,reg){if(!reg)return[];const ex=new Set(reg.excludes||[]),bad=new Set();(tags||[]).forEach(t=>{if(ex.has(t))bad.add(t);});
+  if((reg.allows||[]).length){const al=new Set(reg.allows);(tags||[]).forEach(t=>{if(!al.has(t))bad.add(t);});}return[...bad].sort();}
+function effFor(reg,avoid){if(!(avoid||[]).length)return reg;const e=Object.assign({},reg||{id:'',name:'',allows:[],excludes:[],note:''});
+  e.excludes=[...new Set([...(e.excludes||[]),...avoid])].sort();return e;}
+const CHIP_TAGS=['beef','pork','poultry','fish','shellfish','dairy','egg','beans','grain','potato','fruit','nuts','vegetable','soy'];   /* the food groups a person can leave out: plate_config.FOOD_TAGS */
+const COUNT_KEYS=[['red_meat_slots','beef','red_meat'],['fish_slots','fish','fish'],['beans_slots','bean',null]];
+const COUNT_TAG={red_meat_slots:'beef',fish_slots:'fish',beans_slots:'beans'}, CLASSWORD={red_meat:'beef',fish:'fish',beans:'bean'};
+const TARGET_WORD={fiber_g:'fiber',sat_fat_g:'saturated fat',added_sugar_g:'added sugar'};
+const countsAs=(m,key,cls)=>key==='beans_slots'?(m.contains||[]).includes('beans'):m.protein_class===cls;
+/* the food groups a person can still leave out on a plan: what it keeps, never what it already leaves out */
+function chipsFor(reg){if(!reg)return CHIP_TAGS.slice();if((reg.allows||[]).length)return CHIP_TAGS.filter(t=>reg.allows.includes(t));return CHIP_TAGS.filter(t=>!(reg.excludes||[]).includes(t));}
+function planFit(reg,avoid){const e=effFor(reg,avoid);return CFG.meals.filter(m=>m.declared&&!leavesOut(m.contains,e).length);}
+function planGaps(reg,avoid){const e=effFor(reg,avoid),out=[],fit=planFit(reg,avoid);
+  SLOTS.forEach(sl=>{const total=sl.opts.length,kept=sl.opts.filter(o=>!leavesOut(o.contains,e).length).length,name=shortName(sl.name).toLowerCase();
+    if(kept===0&&(sl.occasion||ROT)!==ROT)out.push('no '+name+' fits');else if(kept===1&&total>1)out.push('one '+name+' option');});
+  if(fit.length<2*N)out.push(fit.length+' dinners fit, two rotations need '+(2*N));
+  COUNT_KEYS.forEach(([key,word,cls])=>{const asked=reg?reg[key]:null;if(asked==null||asked<=0)return;const n=fit.filter(m=>countsAs(m,key,cls)).length;
+    if(n<asked)out.push('asks for '+fmt(asked)+' '+word+' night'+(asked===1?'':'s')+', '+n+' fit');});
+  return out;}
 /* ENGINE-CORE-END */
 let EXTRA=false;                        /* the Also had picker is open */
 let TRIP={};                            /* a trip being planned, per store: the meals it covers */
@@ -462,7 +519,15 @@ window.act={
    }catch(e){SMSG=e.message;render();}},
  regimenPick(v){RSEL=v;RMSG='';render();},
  /* the interview's plan line follows the picker without a redraw (a redraw would reset the rail) */
- frPlan(v){const el=document.getElementById('fr-planline');if(el)el.textContent=planLine(REGS.find(x=>x.id===v)||null);},
+ frPlan(v){const r=REGS.find(x=>x.id===v)||null, box=document.getElementById('fr-avoid-chips');
+   if(box)box.outerHTML=fieldAvoid('fr-avoid-',ticked('fr-avoid-',CHIP_TAGS),r);
+   const el=document.getElementById('fr-planline');if(el)el.textContent=planLine(r,ticked('fr-avoid-',CHIP_TAGS));},
+ /* a chip ticked or cleared: the plan line under it says what the chips cost, without a redraw;
+    on You the ticks are kept aside so a plan pick can redraw the card without losing them */
+ chips(prefix){const av=ticked(prefix,CHIP_TAGS);let r=null;
+   if(prefix==='fr-avoid-'){const sel=document.getElementById('fr-regimen');r=REGS.find(x=>x.id===(sel?sel.value:''))||null;}
+   else{RAV=av;r=REGS.find(x=>x.id===(RSEL==null?(REG?REG.id:''):RSEL))||null;}
+   const el=document.getElementById(prefix.replace('avoid-','planline'));if(el)el.textContent=planLine(r,av);},
  /* Who eats: the household number and any per-occasion override, saved the way the store
     picker is: post, then fetch the page again, since the resolved catalog rides inside it. */
  async saveWhoEats(){const g=id=>document.getElementById(id);
@@ -563,7 +628,7 @@ window.act={
    }catch(e){OMSG=e.message;render();}},
  /* the plan is resolved on the Mac and rides inside the page, so a saved choice fetches the
     page again, as the store picker does */
- async saveRegimen(){const v=RSEL==null?(REG?REG.id:''):RSEL, av=ticked('rg-avoid-',Object.keys(TAGWORD)).join('|');
+ async saveRegimen(){const v=RSEL==null?(REG?REG.id:''):RSEL, av=ticked('rg-avoid-',CHIP_TAGS).join('|');
    try{await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'regimen',value:v})});
      if(av!==AVOID.join('|'))await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'avoid',value:av})});
      returnTo({at:'regimen'});say('Saved. Rebuilding the rotation.');setTimeout(()=>location.reload(),350);}
@@ -616,11 +681,14 @@ window.act={
    snapshot(planB?'plan_b':'full');
    report(planB?'plan_b':'full',true,SLOTS.map(sl=>sl.id));
    const wasB=planB,before={...S.inv};planB=false;
-   deduct(draw);S.cursor++;S.checked=[];persist();render();logSound(S.cursor%N===0);
+   deduct(draw);S.cursor++;S.checked=[];USED={cursor:-1,meal:'',amt:{}};persist();render();logSound(S.cursor%N===0);
    const lead=wasB?'Plan B logged. The freezer stayed sealed.':'Logged. Stock updated.';
    TRADED=null;say(lead,logLine(lead));fxSettle(settleInfo(draw,before,wasB?'Plan B: the freezer stayed sealed':'Ate it all'));},
- openPartial(){partial=true;pOven=false;EXTRA=false;render();},
- openExtra(){EXTRA=true;partial=false;render();},
+ /* a tap that opens a sheet brings the sheet to the eye: on a phone the aside is the last grid
+    row, so a card appended under the buttons is below the fold, and a render alone changes
+    nothing in the viewport (found on his phone, 2026-09-06: the tap "did nothing") */
+ openPartial(){partial=true;pOven=false;EXTRA=false;SCROLLTO='partial-card';render();},
+ openExtra(){EXTRA=true;partial=false;SCROLLTO='extra-card';render();say('Pick what you also had.');},
  closeExtra(){EXTRA=false;render();},
  /* something from stock outside the plan: its own row in the log on no cursor, and the one undo
     until the next log. The stamp is made here so the undo can name the row it takes out. */
@@ -630,6 +698,11 @@ window.act={
      gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',at:at};
    if(window.plateEvent)window.plateEvent({cursor:S.cursor,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, beside meal '+(S.cursor+1),at:at});
    deduct(o.uses);EXTRA=false;persist();render();say('Also had '+o.label+'. Stock updated.');},
+ /* the amount of one item tonight's plate takes: stepped in the item's own step, never below
+    nothing, kept until the log that takes it */
+ used(k,d){const m=activeMeal();if(USED.cursor!==S.cursor||USED.meal!==m.id)USED={cursor:S.cursor,meal:m.id,amt:{}};
+   const cur=usedAmt(m,k);USED.amt[k]=Math.max(0,Math.round((cur+d*stepOf(k))*100)/100);render();},
+ usedReset(){USED={cursor:-1,meal:'',amt:{}};render();},
  cancelPartial(){partial=false;render();},
  toggleOven(){pOven=!pOven;render();},
  logPartial(){FLIPSRC='log';ENTER='log';const draw=previewDraw();
@@ -637,7 +710,7 @@ window.act={
    snapshot(pOven&&planB?'plan_b':'partial');
    report(pOven&&planB?'plan_b':'partial',pOven,[...S.checked]);
    const before={...S.inv};planB=false;
-   deduct(draw);S.cursor++;S.checked=[];partial=false;persist();render();logSound(S.cursor%N===0);
+   deduct(draw);S.cursor++;S.checked=[];partial=false;USED={cursor:-1,meal:'',amt:{}};persist();render();logSound(S.cursor%N===0);
    TRADED=null;say('Logged what you ticked.',logLine('Logged what you ticked.'));
    fxSettle(settleInfo(draw,before,'In part: what you ticked'));},
  /* The last log is undoable until the next one. A deliberate undo is the one thing besides
@@ -671,7 +744,7 @@ window.act={
    persist();render();say('Undone. '+L.meal+' is tonight again.'+(L.rebuilt?' Stock was put back as if the whole plate was eaten.':''));},
  toggle(id){JUST=id;S.checked=S.checked.includes(id)?S.checked.filter(x=>x!==id):[...S.checked,id];persist();render();},
  flavToggle(id){JUST=id;S.flav=S.flav.includes(id)?S.flav.filter(x=>x!==id):[...S.flav,id];persist();render();},
- copyFlav(){const m=FLAV.filter(p=>!S.flav.includes(p.id)).map(p=>p.name);
+ copyFlav(){const m=FLAV.filter(p=>!(p.excluded&&p.excluded.length)&&!S.flav.includes(p.id)).map(p=>p.name);
    if(!m.length){say('Flavour pantry is complete.');return;}
    navigator.clipboard?navigator.clipboard.writeText(m.join('\n')).then(()=>say(m.length+' items copied.'),()=>say('Copy blocked')):say('Copy blocked');},
  bump(k,d){ENTER='bump';FLIPSRC='bump';setInv(k,(S.inv[k]||0)+d);persist();render();},
@@ -810,8 +883,8 @@ function plateCard(p){
 const LABS=CFG.labs||{draws:0,results:0};
 function reportCard(){
   if(LABS.draws>0||S.seen.includes('report_nudge'))return '';
-  return '<section class="card card--tint" data-family="sprout" id="reportcard"><span class="t-head" style="display:block">Have a lab report? Add it and dinner adjusts.</span>'+
-    '<p class="t-note" style="margin-top:var(--s1)">One report from the last year is enough to move a night or two of the rotation. It never leaves this device.</p>'+
+  return '<section class="card card--tint" data-family="sprout" id="reportcard"><span class="t-head" style="display:block">'+esc(reportLine('head'))+'</span>'+
+    '<p class="t-note" style="margin-top:var(--s1)">'+esc(reportLine('note'))+' It never leaves this device.</p>'+
     '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn btn--sm btn--ink" type="button" data-fk="addreport" onclick="act.tab(\'markers\');act.mk(\'reports\')">Add a report</button>'+
     '<button class="btn btn--sm" type="button" data-fk="notnow" onclick="act.notNow()">Not now</button></div></section>';
 }
@@ -1168,7 +1241,8 @@ function readsCard(){
   let h='<section class="card"><div class="split"><span class="t-label">What a report can move</span><span class="mono" style="color:var(--ink-3)">'+reads.length+' markers</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">The food rules read these and nothing else: every other marker on a report is charted and moves nothing. Ask for the panel by name; the cost is the lab\'s tier, not a price.</p><div class="rows">';
   reads.forEach(r=>{h+='<div class="row"><span class="row__body"><span class="row__title">'+esc(r.display)+'</span>'+
-    '<span class="row__meta">'+esc(r.panel||'its own panel')+' · '+(r.unmoved?'charted; the '+esc(planName())+' plan does not let it move dinner':'moves '+esc(list(r.targets.map(t=>tlabel(t).toLowerCase())))+' when '+esc(list(r.conditions.map(c=>COND[c]||c))))+'</span></span>'+
+    '<span class="row__meta">'+esc(r.panel||'its own panel')+' · '+(r.unmoved?'charted; the '+esc(planName())+' plan does not let it move dinner':!r.targets.length?'charted; nothing on the '+esc(planName())+' plan for it to move'
+      :'moves '+esc(list(r.targets.map(t=>tlabel(t).toLowerCase())))+' when '+esc(list(r.conditions.map(c=>COND[c]||c))))+'</span></span>'+
     (r.cost?'<span class="pill pill--ghost">'+esc(r.cost)+' cost</span>':'')+'</div>';});
   return h+'</div></section>';
 }
@@ -1177,8 +1251,8 @@ function readsCard(){
    of research: a screen with nothing on record invites, it does not lecture. */
 function noReportCard(id){
   return '<section class="card" data-family="plum" style="border-radius:var(--r-xl);box-shadow:var(--lift-2)" id="'+(id||'noreport')+'"><span class="t-label">No report yet</span>'+
-    '<p class="t-head" style="margin-top:var(--s3)">Add a lab report and dinner adjusts.</p>'+
-    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink-2)">One report from the last year is enough: several of the food rules fire on a single draw and move a night or two of the rotation. '+
+    '<p class="t-head" style="margin-top:var(--s3)">'+esc(reportLine('head2'))+'</p>'+
+    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink-2)">'+esc(reportLine('note2'))+
     'A second report, last year\'s say, lets the rules that wait to see a marker twice fire too. Any lab\'s PDF, or the numbers typed from paper. Nothing leaves this device.</p>'+
     '<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="noreport" onclick="act.mk(\'reports\')">Add a report '+icon('arrow')+'</button></div></section>';
 }
@@ -1200,7 +1274,7 @@ function sinceCard(prim,by,s){
       (did?'<span class="row__note">'+esc(did)+'</span>':'')+'</span>'+(d&&d.drive?'<span class="pill" data-family="plum"><i class="dot"></i>changed dinner</span>':'')+'</div>';});
   h+='</div>';
   if(hidden>0||SINCEALL)h+='<button class="btn" type="button" data-fk="sinceall" style="width:100%;margin-top:var(--s4)" onclick="SINCEALL=!SINCEALL;render()">'+(SINCEALL?'Show fewer':hidden+' more moved')+'</button>';
-  return h+'<p class="t-note" style="margin-top:var(--s3)">The number then and now, and what dinner did about it'+(EXON?', in the rules\' own words':'; turn on Explain these for the rules\' own words')+'. Nothing here is a verdict.</p></section>';
+  return h+'<p class="t-note" style="margin-top:var(--s3)">The number then and now, '+esc(reportLine('did'))+(EXON?', in the rules\' own words':'; turn on Explain these for the rules\' own words')+'. Nothing here is a verdict.</p></section>';
 }
 function viewOverview(){
   const s=MK.s, p=MK.p, by=dietBy();
@@ -1285,13 +1359,16 @@ function viewOverview(){
   if(prim.length)main+='</section>';
 
   if(MK.diet){
-    const d=MK.diet, keys=['kcal','protein_g','fiber_g','added_sugar_g','sat_fat_g','red_meat_slots','fish_slots','beans_slots'].filter(k=>k in d.targets);
+    const d=MK.diet, keys=['kcal','protein_g','fiber_g','added_sugar_g','sat_fat_g','red_meat_slots','fish_slots','beans_slots']
+      .filter(k=>k in d.targets&&!(COUNT_TAG[k]&&!d.targets[k]&&leavesOut([COUNT_TAG[k]],REG).length));   /* a count of nothing the plan has no food for is not a target */
     aside+='<section class="card card--tint" data-family="sprout"><span class="t-label">Your food targets now</span><div class="rows">';
     keys.forEach(k=>{const b=d.baseline[k],t=d.targets[k],changed=t!==b;
       aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(tlabel(k))+'</span>'+
         '<span class="row__meta">'+(changed?'was '+esc(b)+esc(tunit(k))+', moved by a marker':'as your plan was built')+'</span></span>'+
         '<b class="row__val">'+esc(t)+esc(tunit(k))+'</b></div>';});
-    aside+='</div><p class="t-note" style="margin-top:var(--s3)">The rotation is built to hit these. A marker outside its target moves one of them, and the Rotation tab shows where that lands.</p></section>';
+    const unheld=(d.unheld||[]).length?'<p class="t-note" style="margin-top:var(--s2)">'+esc(list(d.unheld.map(k=>TARGET_WORD[k]||k)).replace(/^\w/,c=>c.toUpperCase()))+(d.unheld.length>1?' are not targets':' is not a target')+' on '+esc(Plan())+': its plates are built without '+(d.unheld.length>1?'them':'it')+'.</p>':'';
+    aside+='</div>'+unheld+'<p class="t-note" style="margin-top:var(--s3)">'+(planStays()?'The rotation is built to hit these. On '+esc(Plan())+' a report is charted and dinner stays; the added-sugar cap is the one number a report can still tighten.'
+      :'The rotation is built to hit these. A marker outside its target moves one of them, and the Rotation tab shows where that lands.')+'</p></section>';
   }
 
   /* the next draw: what to add to the order, and what it costs. Every test costs money. */
@@ -1338,9 +1415,40 @@ function coldRow(c,pre,stepper){
     ' data-fk="chk:'+esc(c.id)+'" onchange="act.toggle(\''+esc(c.id)+'\')">'+
     '<label class="row__body" for="'+id+'"><span class="row__title">'+esc(c.label)+'</span>'+
     ((c.name&&c.name!==c.id)||off?'<span class="row__meta">'+esc([c.name&&c.name!==c.id?c.name:'',off].filter(Boolean).join(' · '))+'</span>':'')+'</label>'+
-    '<span class="row__val">'+c.protein_g+' g</span>'+
+    '<span class="row__val">'+c.kcal.toLocaleString()+' kcal · '+c.protein_g+' g</span>'+
     (stepper?'<span class="step2"><button class="iconbtn" type="button" data-fk="cyc:'+esc(c.id)+'" onclick="act.cycle(\''+esc(c.id)+'\')" '+
       'aria-label="Change this slot">'+icon('cycle')+'</button></span>':'')+'</div>';
+}
+/* Take out: a row per item the plate uses, with the amount the log will take and a stepper in
+   the item's own step, so what leaves stock is what was used (his ask, 2026-09-06: "modify the
+   amounts actually used right on the Tonight screen so that stock counts down appropriately").
+   The recipe's amount stays in the row's meta once it differs. */
+const STEP_OF={lb:0.25,oz:1,cups:0.5,tbsp:1};
+const stepOf=k=>STEP_OF[I[k].unit]||1;
+function takeOutRows(m){
+  const ks=Object.keys(m.uses||{}).filter(k=>I[k]&&m.uses[k]!=null);if(!ks.length)return '';
+  const changed=ks.some(k=>usedAmt(m,k)!==m.uses[k]);
+  let h='<p class="t-note" style="margin-top:var(--s2)"><b>Take out.</b> Change an amount if you use more or less; the log takes what is set here.</p><div class="rows">';
+  ks.forEach(k=>{const v=usedAmt(m,k), rec=m.uses[k];
+    h+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
+      (v!==rec?'<span class="row__meta">the recipe says '+esc(fmt(rec)+' '+unitOf(k,rec)).trim()+'</span>':'')+'</span>'+
+      '<span class="row__val">'+esc(fmt(v)+' '+unitOf(k,v)).trim()+'</span>'+
+      '<span class="step2"><button class="iconbtn" type="button" data-fk="used-less:'+esc(k)+'" onclick="act.used(\''+esc(k)+'\',-1)" aria-label="Less '+esc(I[k].name)+'">'+icon('minus')+'</button>'+
+      '<button class="iconbtn" type="button" data-fk="used-more:'+esc(k)+'" onclick="act.used(\''+esc(k)+'\',1)" aria-label="More '+esc(I[k].name)+'">'+icon('plus')+'</button></span></div>';});
+  h+='</div>'+(changed?'<div class="btnrow" style="margin-top:var(--s2)"><button class="btn btn--sm" type="button" data-fk="used-reset" onclick="act.usedReset()">Back to the recipe</button></div>':'');
+  return h;
+}
+/* What tonight's plate is of. "912 kcal on the plate" read as the whole day on his phone
+   (2026-09-06), because nothing said dinner was one of three meals; so the line names the
+   other occasions in play, adds today's options from their pools to the plate, and sets the
+   day beside the target the plate was sized to. One meal a day: the cold block is the rest. */
+function dayLine(m){
+  const cold=coldAt(0), others=OCC.filter(o=>o.id!==ROT).map(o=>o.id);
+  let kc=m.kcal, pr=m.protein_g;cold.forEach(c=>{kc+=c.kcal;pr+=c.protein_g;});
+  const dt=(PLAN&&PLAN.day_targets)||{}, tgt=dt.kcal?', against your '+Math.round(dt.kcal).toLocaleString()+' a day':'';
+  const sum='about '+kc.toLocaleString()+' kcal and '+pr+' g protein';
+  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', cold block included: ':': ')+sum+tgt+'.';
+  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+tgt+'.';
 }
 const statBox=(label,num,unit)=>'<div class="stat"><span class="t-label">'+esc(label)+'</span><span class="numrow"><b class="num num--md">'+num+'</b>'+
   (unit?'<span class="t-unit">'+esc(unit)+'</span>':'')+'</span></div>';
@@ -1403,7 +1511,7 @@ function viewTonight(F){
     const meta=[cookingFor(occPortions(ROT)),plateWord(),ho!=null?ho+' min hands on':''].filter(Boolean).join(' · ');
     main+='<section class="card"><div class="split"><span class="t-label">How it cooks</span>'+
       (meta?'<span class="mono" style="color:var(--ink-3)">'+esc(meta)+'</span>':'')+'</div>'+
-      (qty(m.uses)?'<p class="t-note" style="margin-top:var(--s2)"><b>Take out:</b> '+esc(qty(m.uses))+'.</p>':'')+
+      takeOutRows(m)+
       (m.tray?'<p class="tray">'+esc(m.tray)+'</p>':'')+'<ol class="steps">';
     (m.steps||[]).forEach(x=>{main+='<li><p>'+esc(x)+'</p></li>';});
     if(kit)main+='<li><p><b>'+esc(kit.name)+'.</b> '+esc(kit.instruction)+'</p></li>';
@@ -1436,6 +1544,7 @@ function viewTonight(F){
 
     aside+='<section class="card"><div class="stats stats--2">'+
       statBox('kcal on the plate',(m.kcal+ct.c).toLocaleString(),'')+statBox('Protein',m.protein_g+ct.p,'g')+'</div>'+
+      '<p class="t-note" style="margin-top:var(--s3)">'+esc(dayLine(m))+'</p>'+
       '<div class="actions" style="margin-top:var(--s4)">'+
       '<button class="btn btn-eat" data-fk="eat" onclick="act.cooked()">Ate it all</button>'+
       '<div class="btnrow"><button class="btn" data-fk="partial" onclick="act.openPartial()">Log what I ate</button>'+
@@ -1448,7 +1557,7 @@ function viewTonight(F){
       (planB?'<button class="btn" data-fk="planb" onclick="act.planB(false)">Back to the planned meal</button>':'')+
       '</div><p class="t-note" style="margin-top:var(--s3)">'+esc(nextGoal(F))+'</p>'+
       '<p class="t-note" style="margin-top:var(--s2)">Ate out? Nothing to log. Tonight\'s plate waits, and a night not logged costs nothing.</p></section>';
-    if(EXTRA)aside+='<section class="card" data-family="sprout"><span class="t-label">Also had</span>'+
+    if(EXTRA)aside+='<section class="card" id="extra-card" data-family="sprout"><span class="t-label">Also had</span>'+
       '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move. A thing the plan never held has no stock here, so it stays out.</p><div class="rows">'+
       extraOptions().map(o=>'<button class="row" type="button" data-fk="extra:'+esc(o.key)+'" onclick="act.extra(\''+esc(o.key)+'\')"><span class="row__body"><span class="row__title">'+esc(o.label)+'</span>'+
         '<span class="row__meta">'+(o.slot?esc(o.slot)+' · ':'')+Number(o.kcal).toLocaleString()+' kcal · '+o.protein_g+' g protein</span></span>'+icon('arrow')+'</button>').join('')+
@@ -1456,7 +1565,7 @@ function viewTonight(F){
   } else {
     let pc=pOven?m.kcal:0, pp=pOven?m.protein_g:0;
     coldAt(0).forEach(c=>{if(S.checked.includes(c.id)){pc+=c.kcal;pp+=c.protein_g;}});
-    main+='<section class="card" data-family="frost"><span class="t-label">Tick only what you ate</span><div class="rows">'+
+    main+='<section class="card" id="partial-card" data-family="frost"><span class="t-label">Tick only what you ate</span><div class="rows">'+
       '<div class="row"><input class="tick tick--done" type="checkbox" id="cb-oven"'+(pOven?' checked':'')+' data-fk="oven" onchange="act.toggleOven()">'+
       '<label class="row__body" for="cb-oven"><span class="row__title">'+esc(m.name)+'</span></label>'+
       '<span class="row__val">'+m.protein_g+' g</span></div>';
@@ -1493,7 +1602,7 @@ function nowCard(F){
     title:'Move '+esc(I[nx.thaw]?I[nx.thaw].name.toLowerCase():nx.thaw)+' to the fridge',
     meta:'After tonight. Next up is '+esc(nx.name.toLowerCase())+'.'});
   if(LABS.draws===0&&!S.seen.includes('report_nudge'))rows.push({ico:'marker',fam:'plum',fk:'now:report',go:"act.tab('markers');act.mk('reports')",
-    title:'Add a lab report',meta:'One from the last year is enough to move a night or two of dinner.'});
+    title:'Add a lab report',meta:esc(reportLine('now'))});
   if(CFG.plate_step)rows.push({ico:'check',fam:'sprout',fk:'now:plate',go:"act.jumpK('platecard')",
     title:'The scale stepped the plate',meta:'Read what changed. Undo if you want it back.'});
   let h='<section class="card" id="now" aria-label="What to do now"><div class="split"><span class="t-label">Now</span>'+
@@ -1513,11 +1622,12 @@ function nowCard(F){
    are sprout, poultry is clay, pork is plum. It used to be the plate's shape in file order,
    which nobody could tell from looking. */
 const PROTFAM={red_meat:'ember',pork:'plum',poultry:'clay',fish:'frost',shellfish:'frost',plant:'sprout',egg:'sprout',dairy:'sprout',pantry:'sprout'};
-const PROTWORD={red_meat:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',plant:'plant',egg:'eggs',dairy:'dairy',pantry:'pantry'};
+const PROTWORD={red_meat:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',plant:'plant-based',egg:'eggs',dairy:'dairy',pantry:'no thaw'};
 const famOf=m=>PROTFAM[m.protein_class]||'sprout';
 /* The food-group note under the rotation: one group that lands three or more times on a night
    whatever the cold block draws. The engine counts it in both twins; the page only says it. */
-const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy'};
+const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings'};
+const tagWords=ts=>list((ts||[]).map(t=>TAGWORD[t]||t));
 const NUMWORD=['no','one','two','three','four','five','six','seven','eight','nine'];
 function groupLine(g){
   const word=TAGWORD[g.tag]||g.tag, parts=(g.slots||[]).map(s=>'the '+String(s).split(' — ')[0].toLowerCase());
@@ -1577,7 +1687,7 @@ function rotRow(F,i){
         (xk?'<dt>Flavour</dt><dd><b>'+esc(xk.name)+'.</b> '+esc(xk.instruction)+'</dd>':'')+
         '<dt>Uses</dt><dd>'+esc(uses)+'</dd>'+
         '<dt>Cold block</dt><dd>'+esc(coldAt(i,ROT).map(c=>c.label).join(', ')||'none: put away beside your other meals')+'</dd>'+
-        '<dt>Macros</dt><dd><b>'+(x.kcal+ct.c).toLocaleString()+'</b> kcal, <b>'+(x.protein_g+ct.p)+'</b> g protein with the cold block</dd>'+
+        '<dt>Macros</dt><dd><b>'+(x.kcal+ct.c).toLocaleString()+'</b> kcal, <b>'+(x.protein_g+ct.p)+'</b> g protein'+(ct.c?' with the cold block':'')+'</dd>'+
         (x.tray?'<dt>Tray</dt><dd>'+esc(x.tray)+'</dd>':'')+
         (x.thaw?'<dt>Thaw</dt><dd>'+esc(I[x.thaw]?I[x.thaw].name:x.thaw)+', the meal before</dd>':'')+
         '<dt>Shape</dt><dd>'+esc(x.form||'Plate')+'</dd>'+
@@ -1595,10 +1705,10 @@ function whyCard(F,opt){
   let h='<section class="card card--tint'+(opt.cls?' '+opt.cls:'')+'" data-family="plum"><span class="t-label">'+esc(opt.label||'Why the rotation looks like this')+'</span>';
   const left=(PLAN&&PLAN.unplaced)||[];
   if(!SWAPS.length&&!left.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">The rotation already matches every '+
-    'target your labs ask for'+(REG?', and every meal in it is on the '+esc(planName())+' plan':'')+'. Nothing in it was moved by a marker.</p></section>';
+    'target your labs ask for'+(REG?', and every meal in it is on the '+esc(planName())+' plan':'')+(planStays()?', which keeps dinner as it is whatever a report says.':'. Nothing in it was moved by a marker.')+'</p></section>';
   SWAPS.forEach(sw=>{
     const pending=S.pending[sw.key]!=null&&S.pending[sw.key]>0, landed=S.applied&&S.applied.includes(sw.key), flip=F.flips[sw.key];
-    const moves=Object.entries(sw.changes||{}).map(([c,v])=>tlabel(c).toLowerCase()+' nights '+v[0]+' to '+v[1]).join(', ');
+    const moves=list(Object.entries(sw.changes||{}).map(([c,v])=>(CLASSWORD[c]||c)+' nights '+v[0]+' to '+v[1]));
     const rules=[...new Set((sw.why||[]).map(a=>a&&(a.display||a.rule)).filter(Boolean))];
     const leaving=(sw.excluded||[]).length>0, mk=leaving?null:(sw.why||[]).map(a=>a&&a.marker).filter(Boolean)[0];
     /* a swap the plan asked for says so in its own words and points at no marker */
@@ -1633,10 +1743,12 @@ function viewRotation(F){
   h+='<section class="card a-main"><div class="split"><span class="t-label">The next '+N+' meals</span>'+
     '<span class="mono" style="color:var(--ink-3)">no dates, only meals</span></div><div class="rows">';
   for(let i=0;i<N;i++)h+=rotRow(F,i);
+  const fams=new Set(S.order.map(k=>MEALS[k]&&MEALS[k].protein_class).filter(Boolean)), distinct=new Set(S.order).size===N;
+  const legend=[...new Set([['red_meat','beef is orange'],['fish','fish and shellfish blue'],['shellfish','fish and shellfish blue'],['plant','plant and bean plates green'],['poultry','poultry tan'],['pork','pork plum']]
+    .filter(([c])=>fams.has(c)).map(([,w])=>w))];
   h+='</div><p class="t-note" style="margin-top:var(--s4)">Open a meal to see it whole, or send it to tonight. '+
-    'A protein comes back roughly every '+N+' meals and its flavour kit has moved on by then, so an identical meal '+
-    'does not recur for months. The colour beside each meal is its protein, the thing the rotation counts: beef is orange, fish and shellfish blue, '+
-    'plant and bean plates green, poultry tan, pork plum. Meals, kits and stock are rows in config '+WHERE+'.</p>'+
+    (distinct?'A protein comes back roughly every '+N+' meals and its flavour kit has moved on by then, so an identical meal does not recur for months. ':'')+
+    (legend.length?'The colour beside each meal is its protein, the thing the rotation counts: '+legend.join(', ')+'. ':'')+'Meals, kits and stock are rows in config '+WHERE+'.</p>'+
     (CFG.group_note?'<p class="t-note" style="margin-top:var(--s2)">'+esc(groupLine(CFG.group_note))+'</p>':'')+'</section>';
   h+=whyCard(F,{cls:'a-aside'});
   return h+'</div>';
@@ -1719,7 +1831,7 @@ function viewKitchen(F){
   const nocold=NOCOLD.filter(c=>{const sl=SLOTS.find(s=>s.id===c.slot);const o=sl&&sl.opts.find(x=>x.label===c.label);
     return !!o&&(o.excluded_items||[]).some(k=>(S.inv[k]||0)>0);});
   if((REG||AVOID.length)&&(noreg.length||nocold.length))hero+='<section class="card card--tint" data-family="ember"><span class="t-label">'+(REG?'Not on the '+esc(planName())+' plan':'What you leave out')+'</span>'+
-    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(noreg.length?esc(noreg.map(k=>MEALS[k].name+' (has '+list(MEALS[k].excluded)+')').join(', '))+'. ':'')+
+    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(noreg.length?esc(noreg.map(k=>MEALS[k].name+' (has '+tagWords(MEALS[k].excluded)+')').join(', '))+'. ':'')+
     (nocold.length?'From the cold block: '+esc(nocold.map(c=>c.label).join(', '))+'. ':'')+
     'Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while it stays left out.</p>'+
     '<button class="btn btn--sm btn--quiet" type="button" data-fk="goplan" style="margin-top:var(--s2);padding-left:0" onclick="act.you(\'regimen\')">Change how you eat '+icon('arrow')+'</button></section>';
@@ -1773,7 +1885,7 @@ function viewKitchen(F){
     main+='<section class="card" id="k-zone-'+esc(z)+'" data-family="'+(ZFAM[z]||'frost')+'"><div class="split"><span class="t-label">'+esc(capz(z))+'</span>'+
       '<span class="mono" style="color:var(--ink-3)">'+ks.length+' item'+(ks.length===1?'':'s')+'</span></div><div class="rows">';
     ks.forEach(k=>{const d=L[k], down=!used.has(k), st=storeOf(k), thr=st?(st.threshold||0):0, nostore=!st&&!down;
-      const q=Math.round((S.inv[k]||0)*10)/10, pct=Math.round(((S.inv[k]||0)/(I[k].pack||1))*100);
+      const q=stepOf(k)===1&&I[k].unit!=='oz'&&I[k].unit!=='tbsp'?Math.round(S.inv[k]||0):Math.round((S.inv[k]||0)*10)/10, pct=Math.round(((S.inv[k]||0)/(I[k].pack||1))*100);
       const cls=down?'out':(d<=thr?'low':'');
       const left=d>=H?'deep, over '+H+' meals':d<=0?'out':nMeals(d)+' left';
       const note=down?'Eating down: the rotation no longer uses this, so it stays off the list'
@@ -1788,10 +1900,10 @@ function viewKitchen(F){
     main+='</div></section>';});
 
   /* the flavour pantry, and the way out */
-  const miss=FLAV.filter(p=>!S.flav.includes(p.id)).length;
+  const flav=FLAV.filter(p=>!(p.excluded&&p.excluded.length)), miss=flav.filter(p=>!S.flav.includes(p.id)).length;
   let aside='<section class="card" id="k-flav" data-family="clay"><div class="split"><span class="t-label">Flavour pantry</span>'+
     '<span class="mono" style="color:var(--ink-3)">one-time buy</span></div><div class="rows">';
-  FLAV.forEach(p=>{const on=S.flav.includes(p.id);
+  flav.forEach(p=>{const on=S.flav.includes(p.id);
     aside+='<div class="row"><input class="tick tick--done" type="checkbox" id="fl-'+esc(p.id)+'"'+(on?' checked':'')+
       ' data-fk="flav:'+esc(p.id)+'" onchange="act.flavToggle(\''+esc(p.id)+'\')">'+
       '<label class="row__body" for="fl-'+esc(p.id)+'"><span class="row__title">'+esc(p.name)+'</span><span class="row__meta">'+esc(p.note)+'</span></label></div>';});
@@ -2295,28 +2407,30 @@ async function dinnerAfter(r){
 }
 
 /* ---- HOW YOU EAT: the plan in play, and what another would leave out --------------------- */
-let RSEL=null,RMSG='';                  /* the picker's unsaved choice */
+let RSEL=null,RMSG='',RAV=null;         /* the picker's unsaved choice, and its unsaved chips */
 function viewRegimen(){
-  const cur=RSEL==null?(REG?REG.id:''):RSEL, r=REGS.find(x=>x.id===cur)||null, total=CFG.meals.length;
-  const fit=x=>total-(x.leaves_out_meals||[]).length;
+  const cur=RSEL==null?(REG?REG.id:''):RSEL, r=REGS.find(x=>x.id===cur)||null;
+  const fit=x=>planFit(x,[]).length;                 /* the dinners a person can rotate through: declared, and not left out */
   let h='<section class="card" id="regimen" data-family="sprout"><div class="split"><span class="t-label">How you eat</span>'+
-    '<span class="mono" style="color:var(--ink-3)">'+(r?fit(r)+' of '+total+' meals fit':'any meal')+'</span></div>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A plan says what a meal may contain and how many beef, fish and bean nights a cycle asks for. Your labs adjust those counts on top of it.</p>'+
+    '<span class="mono" style="color:var(--ink-3)">'+(r?fit(r)+' dinners':'any meal')+'</span></div>'+
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A plan says what a meal may contain and how many nights of each protein a cycle asks for. Your labs adjust those counts on top of it, where the plan lets them.</p>'+
     '<div class="formgrid"><div class="field wide"><span>Plan</span><select data-fk="regsel" onchange="act.regimenPick(this.value)">'+
     '<option value=""'+(cur===''?' selected':'')+'>No plan: any meal in the catalog</option>'+
-    REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===cur?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' of '+total+' meals fit</option>').join('')+'</select></div></div>';
-  h+='<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat, on top of the plan. A meal or a cold option that has it leaves the pool.</p>'+fieldAvoid('rg-avoid-',AVOID);
+    REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===cur?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' dinners</option>').join('')+'</select></div></div>';
+  const rav=RAV||AVOID;
+  h+='<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat, on top of the plan. A meal, a cold option, a kit or a pantry row that has it leaves the pool.</p>'+fieldAvoid('rg-avoid-',rav,r);
   if(AVOID.length){const gone=[...new Set(S.order.filter(k=>MEALS[k]&&(MEALS[k].excluded||[]).some(t=>AVOID.includes(t))))];
     h+='<p class="t-note" style="margin-top:var(--s2)">You leave out '+esc(list(AVOID.map(t=>TAGWORD[t]||t)))+'. '+(gone.length?gone.length+' of your '+N+' rotation nights change ('+esc(gone.map(k=>MEALS[k].name).join(', '))+'), each once the stock it was eating is gone.':'Nothing in your rotation has it.')+'</p>';}
+  if(!r)h+='<p class="t-body" id="rg-planline" style="margin-top:var(--s3);color:var(--ink)">'+esc(planLine(null,rav))+'</p>';
   if(r){
     const out=new Set(r.leaves_out_meals||[]), gone=S.order.filter(k=>out.has(k)), names=[...new Set(gone.map(k=>MEALS[k]?MEALS[k].name:k))];
-    const asks=[[r.red_meat_slots,'beef'],[r.fish_slots,'fish'],[r.beans_slots,'bean']].filter(x=>x[0]!=null).map(x=>x[0]+' '+x[1]);
-    h+='<p class="t-body" style="margin-top:var(--s3);color:var(--ink)">'+esc(r.note||'')+(r.excludes.length?' Leaves out '+esc(list(r.excludes))+'.':'')+(r.allows.length?' Only '+esc(list(r.allows))+'.':'')+
-      (asks.length?' Asks for '+esc(asks.join(', '))+' nights per cycle.':'')+'</p>';
-    if((r.gaps||[]).length)h+='<p class="t-note" style="margin-top:var(--s2)">Not a whole day yet: '+esc(r.gaps.join('; '))+'.</p>';
-    if(fit(r)===0)h+='<div class="callout warn" style="margin-top:var(--s3)">No meal in the catalog fits this plan yet, so the rotation would stand as it is until one is added.</div>';
+    h+='<p class="t-body" id="rg-planline" style="margin-top:var(--s3);color:var(--ink)">'+esc(planLine(r,rav))+'</p>';
+    if(planFit(r,rav).length===0)h+='<div class="callout warn" style="margin-top:var(--s3)">No meal in the catalog fits this plan with what you leave out, so the rotation would stand as it is until one is added.</div>';
     else if(gone.length)h+='<p class="t-note" style="margin-top:var(--s2)">'+gone.length+' of your '+N+' rotation nights would change ('+esc(names.join(', '))+'), each once the stock it was eating is gone.</p>';
-    if((r.leaves_out_cold||[]).length)h+='<p class="t-note" style="margin-top:var(--s2)">From the cold block: '+esc(r.leaves_out_cold.join(', '))+'.</p>';
+    /* what the plan leaves out of the pools, as a count and the groups, never a list of the food
+       itself: a wall of labels a person will not eat is noise, and the rows say the rest */
+    if((r.leaves_out_cold||[]).length){const gone=new Set();SLOTS.forEach(sl=>sl.opts.forEach(o=>leavesOut(o.contains,r).forEach(t=>gone.add(t))));const n=r.leaves_out_cold.length;
+      h+='<p class="t-note" style="margin-top:var(--s2)">From the cold block, '+n+' option'+(n===1?' leaves':'s leave')+': anything with '+esc(tagWords([...gone]))+'.</p>';}
   }
   h+='<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="regsave" onclick="act.saveRegimen()">Save</button></div>'+
     (RMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(RMSG)+'</p>':'')+'</section>';
@@ -2348,7 +2462,7 @@ function setupAnswers(prefix){
   if(prefix!=='fr-')return {};
   const g=id=>document.getElementById(id), on=(pre,keys)=>keys.filter(k=>{const el=g(pre+k);return el&&el.checked;});
   if(!g('fr-regimen'))return {};
-  return {regimen:g('fr-regimen').value,portions:g('fr-people').value,occasions:on('fr-occ-',(CFG.occasion_catalog||[]).map(o=>o.id)).join('|'),avoid:on('fr-avoid-',Object.keys(TAGWORD)).join('|')};
+  return {regimen:g('fr-regimen').value,portions:g('fr-people').value,occasions:on('fr-occ-',(CFG.occasion_catalog||[]).map(o=>o.id)).join('|'),avoid:on('fr-avoid-',CHIP_TAGS).join('|')};
 }
 /* ---- YOUR KITCHEN, WHEN YOU EAT, and FIRST RUN ------------------------------------------- */
 let KMSG='',OMSG='',FRMSG='';          /* the cards' and the interview's save errors, if any */
@@ -2372,8 +2486,9 @@ function fieldOccasions(prefix,on){
 }
 /* what you will not eat: one tick per food group the engine knows, the same renderer in the
    interview and under How you eat. Read fresh from the DOM at Save, like the other pickers. */
-function fieldAvoid(prefix,on){
-  return '<div class="ticks">'+Object.keys(TAGWORD).map(t=>'<label class="tick-pill" for="'+prefix+t+'"><input class="tick" type="checkbox" id="'+prefix+t+'" data-fk="'+prefix+t+'"'+(on.includes(t)?' checked':'')+'><span>'+esc(TAGWORD[t])+'</span></label>').join('')+'</div>';
+function fieldAvoid(prefix,on,reg){
+  return '<div class="ticks" id="'+prefix+'chips">'+chipsFor(reg).map(t=>'<label class="tick-pill" for="'+prefix+t+'"><input class="tick" type="checkbox" id="'+prefix+t+'" data-fk="'+prefix+t+'"'+(on.includes(t)?' checked':'')+
+    ' onchange="act.chips(\''+prefix+'\')"><span>'+esc(TAGWORD[t])+'</span></label>').join('')+'</div>';
 }
 function ticked(prefix,keys){return keys.filter(k=>{const el=document.getElementById(prefix+k);return el&&el.checked;});}
 function viewKitchenCard(){
@@ -2401,13 +2516,13 @@ const STORY=[
   ['Cook tonight, log it, shop when it says','Tonight is one plate, with what to take out and how it cooks. Log what you ate and the stock counts down; the list for each store opens when it is time to go. No calendar: time moves when you eat.'],
   ['Add a lab report, and dinner adjusts','Any lab\'s PDF, or the numbers typed from paper. The markers set a few nights of the rotation, one swap at a time, only once the food you already bought is eaten.'],
   ['Weigh in, and the plate corrects itself','A few weigh-ins over three weeks tell it whether the plate is right. It steps the plate and says so on Tonight; Undo if you want it back.'],
-  ['Know the next draw before you pay for it','It says when the next draw is due, what to order and what it costs, and after the retest, what moved and what dinner did about it.'],
+  ['Know the next draw before you pay for it','It says when the next draw is due, what to order and what it costs, and after the retest, what moved, and whether dinner did anything about it.'],
 ];
 function storyCard(opt){
   opt=opt||{};
   let h='<section class="card'+(opt.cls?' '+opt.cls:'')+'" id="'+(opt.id||'story')+'"><div class="split"><span class="t-label">How Plateside works</span><span class="mono" style="color:var(--ink-3)">in order</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">What to cook, what to buy, and when. Your weight goal sizes the plate; your blood work shapes the rotation underneath.</p><ol class="steps">';
-  STORY.forEach(([t,d])=>{h+='<li><p><b>'+esc(t)+'.</b> '+esc(d)+'</p></li>';});
+  STORY.forEach(([t,d],i)=>{if(i===2&&planStays())[t,d]=reportLine('story');h+='<li><p><b>'+esc(t)+'.</b> '+esc(d)+'</p></li>';});   /* the report step, in this plan's words */
   return h+'</ol></section>';
 }
 
@@ -2450,11 +2565,11 @@ function targetLine(){
   const e=TGT.estimate||{}, k=TGT.kcal!=null?TGT.kcal:e.kcal;
   if(e.missing&&e.missing.length)return 'Still needed: '+list(e.missing.map(k=>BODYLABEL[k]||k))+'.';
   let s='About '+k.toLocaleString()+' kcal and '+e.protein_g+' g protein a day'+(e.goal==='hold'?'.':e.goal==='lose'?', to lose '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.':', to gain '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.');
-  if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest this plan goes.';
+  if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest the plates go.';
   if(e.protein_clamped)s+=' Protein is held to '+e.protein_g+' g, the edge of the band the plan uses.';
   const p=TGT.plate;
   if(p&&p.ratio!=null){const pct=Math.round(Math.abs(1-p.plate)*100), dir=p.plate<1?'smaller':'larger';
-    if(p.clamped)s+=' This plan cannot be scaled that far: plates stop at '+pct+' percent '+dir+' than the recipes as written, about '+p.plate_kcal.toLocaleString()+' kcal a day.';
+    if(p.clamped)s+=' The plates cannot be scaled that far: they stop at '+pct+' percent '+dir+' than the recipes as written, about '+p.plate_kcal.toLocaleString()+' kcal a day.';
     else s+=p.plate===1?' Plates as the recipes are written.':' Plates about '+pct+' percent '+dir+' than the recipes as written.';
     /* the plate on the shelf is not this one yet: say what Save does, in the same words */
     if(S.setup&&Math.abs(p.plate-PLATE)>1e-9)s+=' They are '+(PLATE===1?'as written':'about '+Math.round(Math.abs(1-PLATE)*100)+' percent '+(PLATE<1?'smaller':'larger'))+' now; save, and they follow.';}
@@ -2498,7 +2613,7 @@ function viewFirstRun(){
   const eqOn=common.length?common:CFG.equipment_order;
   const occOn=(CFG.occasion_catalog||[]).filter(o=>o.rotation||o.id==='breakfast'||o.id==='lunch').map(o=>o.id);
   const regDefault=REGS.some(x=>x.id==='omnivore')?'omnivore':(REG?REG.id:'');
-  const total=CFG.meals.length, fit=x=>total-(x.leaves_out_meals||[]).length;
+  const fit=x=>planFit(x,[]).length;                 /* the dinners a person can rotate through */
   /* the rail: one segment per card, lit as each card comes into view, the body card's only when
      it is complete; and the bar that rises with the target line and the button once it is. The
      rail sits before the stack, which is a grid of named areas that would place it last. */
@@ -2515,11 +2630,11 @@ function viewFirstRun(){
   h+='<div class="pile a-aside">';
   h+='<section class="card fr-card" id="fr-c0"><span class="t-label">How you eat</span>'+
     '<div class="formgrid" style="margin-top:var(--s2)"><div class="field wide"><span>Plan</span><select id="fr-regimen" data-fk="fr-regimen" onchange="act.frPlan(this.value)">'+
-    REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===regDefault?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' of '+total+' meals fit</option>').join('')+
+    REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===regDefault?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' dinners</option>').join('')+
     '<option value=""'+(regDefault===''?' selected':'')+'>No plan: any meal in the catalog</option></select></div>'+
     '<div class="field"><span>People</span><input type="number" id="fr-people" data-fk="fr-people" min="1" max="100" step="1" value="'+esc(fmt(PORTIONS))+'"></div></div>'+
-    '<p class="t-note" id="fr-planline" style="margin:var(--s2) 0 0">'+esc(planLine(REGS.find(x=>x.id===regDefault)||null))+'</p>'+
-    '<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat. A meal or a cold option that has it leaves the pool.</p>'+fieldAvoid('fr-avoid-',AVOID)+'</section>';
+    '<p class="t-note" id="fr-planline" style="margin:var(--s2) 0 0">'+esc(planLine(REGS.find(x=>x.id===regDefault)||null,AVOID))+'</p>'+
+    '<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat, on top of the plan. A meal, a cold option, a kit or a pantry row that has it leaves the pool.</p>'+fieldAvoid('fr-avoid-',AVOID,REGS.find(x=>x.id===regDefault)||null)+'</section>';
   h+='<section class="card fr-card" id="fr-c1"><span class="t-label">What you cook on</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A meal is written for each of these. Tick what your kitchen has.</p>'+
     fieldKitchen('fr-eq-',eqOn)+fieldTime('fr-time',20)+'</section>';
@@ -2733,7 +2848,7 @@ function viewProfile(){
         '<dt>The tier</dt><dd>The band your ten-year heart risk falls in, as the PREVENT calculator or your clinician puts it. '+tiers.map(t=>'<b>'+TIERWORD[t]+'</b>: '+TIERBAND[t]+'.').join(' ')+'</dd>'+
         '<dt>Knowing yours</dt><dd>Plateside cannot compute it: PREVENT needs your blood pressure and whether you smoke, have diabetes or take a statin or a blood-pressure pill, none of which the app asks. Your clinician can, in a minute, from the same blood work; so can the calculator at professional.heart.org. Until then the guideline default, intermediate, stands.</dd>'+
         '<dt>What it changes</dt><dd>Three targets: LDL, non-HDL and ApoB. A higher tier asks for lower lines. Nothing else in the app reads it.</dd>'+
-        '<dt>The lens</dt><dd>Conventional judges every number against the major guidelines\' targets; functional against the tighter optimal ranges from functional and longevity medicine. Both are always shown on every marker. The lens picks which one counts as outside target, and outside target is what the food rules read, so a stricter lens can move more nights of the rotation.</dd>'+
+        '<dt>The lens</dt><dd>Conventional judges every number against the major guidelines\' targets; functional against the tighter optimal ranges from functional and longevity medicine. Both are always shown on every marker. The lens picks which one counts as outside target, and outside target is what the food rules read, so a stricter lens can move more nights of the rotation'+esc(reportLine('lens'))+'.</dd>'+
         '<dt>Your history</dt><dd>A fact added below changes two things today: the draw plan, so what to test next and how soon, and the panels it sits beside. It never changes dinner. Only the tier and the lens change which targets judge you.</dd>'+
         '<dt>Why it matters</dt><dd>These two settings decide what outside target means for you, and that is the one thing the food rules read. Set them once, with your clinician if you can. The wrong tier judges your cholesterol against the wrong line.</dd>'+
       '</dl></div></div></div>';
@@ -2794,7 +2909,7 @@ const GUIDE=[
     {when:v=>v.tab!=='tonight',sel:'[data-fk="tab:tonight"]',line:'Tonight shows the one plate to cook.'},
     {when:v=>true,sel:'[data-fk="eat"]',line:'Cook this. Once you have eaten, tap Ate it all: the stock moves and the next plate reads in.'}]},
   {key:'guide_report',due:v=>v.cursor>0&&v.draws===0&&!v.declined,done:v=>v.draws>0,hops:[
-    {when:v=>v.tab==='tonight',sel:'[data-fk="now:report"],[data-fk="addreport"]',line:'Got a lab report? Add it here, and a night or two of dinner changes.'},
+    {when:v=>v.tab==='tonight',sel:'[data-fk="now:report"],[data-fk="addreport"]',line:'Got a lab report? Add it here, and a night or two of dinner changes.',stays:'Got a lab report? Add it here. The numbers are charted, and dinner stays, as your plan asks.'},
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Your lab reports live under Markers.'},
     {when:v=>v.mk!=='reports',sel:'[data-fk="mkadd"]',line:'Tap Add a report.'},
     {when:v=>true,sel:'[data-fk="uplbtn"],[data-fk="typebtn"]',line:'Pick your lab\'s PDF, or type the numbers from paper. No report yet? Skip this for now.'}]},
@@ -2805,7 +2920,7 @@ const GUIDE=[
   {key:'guide_moved',due:v=>v.draws>=2&&v.moved!==false,done:v=>false,arrive:true,can:v=>v.draws>=2,later:'After a second draw, Markers says what moved.',hops:[
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'A second draw is on file. Markers says what moved.'},
     {when:v=>v.mk!=='overview',sel:'[data-fk="mkv:overview"]',line:'All markers shows what moved since your last draw.'},
-    {when:v=>true,sel:'#since',line:'What moved between the two draws, and what dinner did about it.'}]}
+    {when:v=>true,sel:'#since',line:'What moved between the two draws, and what dinner did about it.',stays:'What moved between the two draws. Dinner stays, as your plan asks.'}]}
 ];
 /* the first step not yet seen: {done:key} when the state already did it, else the hop to light;
    {done:key, later:line} when a tour reaches a step whose screen cannot exist yet, so the
@@ -2820,7 +2935,7 @@ function guidePlan(v){
       if(!s.due(v))continue;
     } else if(s.can&&!s.can(v))return {done:s.key,later:s.later};
     const i=s.hops.findIndex(h=>h.when(v)), h=s.hops[i];
-    return {key:s.key,sel:h.sel,line:h.line,last:i===s.hops.length-1,arrive:!!s.arrive,n:GUIDE.indexOf(s),of:GUIDE.length};
+    return {key:s.key,sel:h.sel,line:(v.stays&&h.stays)||h.line,last:i===s.hops.length-1,arrive:!!s.arrive,n:GUIDE.indexOf(s),of:GUIDE.length};
   }
   return null;
 }
@@ -2828,7 +2943,7 @@ function guidePlan(v){
 let GTARGET=null, GKEY=null, GRAF=null, GPLAN=null, GFORCE=false, GSHOWN=false, GCLOSING=false, GLATER=[];
 function guideView(){
   const live=liveItems();
-  return {on:!!S.guide,tour:!!S.tour,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,
+  return {on:!!S.guide,tour:!!S.tour,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,stays:planStays(),
     empty:live.length>0&&live.every(k=>(S.inv[k]||0)===0),
     draws:(LABS&&LABS.draws)||0,declined:S.seen.includes('report_nudge'),
     weighed:(BODY&&!BODY.error&&BODY.weigh)?(BODY.weigh.entries||0)>0:null,

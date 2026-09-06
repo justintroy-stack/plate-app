@@ -216,7 +216,10 @@ export function buildPlan(cfg, diet, order = null) {
     const leaving = truthy(get(old_m, 'excluded'));
     const why = leaving ? [] : pyIter(get(diet, 'adjustments') || []).filter(a => truthy(get(a, 'changed'))
       && COUNT_KEYS.some(([key, cls]) => has(changed, cls) && get(a, 'target') === key));
-    const gate = get(old_m, 'protein_item');
+    // a swap the plan asked for waits for the ingredient the plan leaves out, not the meat the
+    // kept plates still use (rotation.py); a food never bought never holds a plate in place
+    const exi = get(old_m, 'excluded_items') || [];
+    const gate = leaving ? (exi.length ? exi[0] : null) : get(old_m, 'protein_item');
     const item = truthy(gate) ? get(cfg.items, gate) : null;
     swaps.push({ key: old + '>' + nu, slot: pos, from: old, to: nu,
       from_name: old_m.name, to_name: new_m.name,

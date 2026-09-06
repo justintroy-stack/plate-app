@@ -42,11 +42,21 @@ export const REGIMEN_COLUMNS = ['id', 'name', 'allows', 'excludes', 'red_meat_sl
 export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 'note'];
 // The food groups an ingredient can belong to. A regimen speaks in these, so a tag outside the
 // list is a typo and is refused rather than quietly excluding nothing.
-export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy'];
+// the first fourteen are food groups an item can belong to; the last four are what a kit or a
+// pantry row is made of (dry spices, plant sauces and condiments, real sugar, the bowl's sweet
+// flavourings), so a plan can leave those out too. No item carries them.
+export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy',
+  'spice', 'sauce', 'sugar', 'sweet'];
+export const FOOD_TAGS = TAGS.slice(0, 14);
 // The food behind each count the planner keeps. Red meat in this catalog is beef.
 export const COUNT_TAGS = { red_meat_slots: 'beef', fish_slots: 'fish', beans_slots: 'beans' };
+// units a thing is counted in rather than measured: a plate takes out whole ones
+export const COUNTABLE_UNITS = ['each', 'eggs', 'slices', 'fillets', 'cans', 'links'];
 // The same counts as the picker says them and as the planner counts them (plate_config.py)
 export const COUNT_WORDS = { red_meat_slots: 'beef', fish_slots: 'fish', beans_slots: 'bean' };
+// the targets a plan may declare it does not hold (regimens.csv unheld), and their words
+export const UNHELD_KEYS = ['fiber_g', 'sat_fat_g', 'added_sugar_g'];
+export const TARGET_WORDS = { fiber_g: 'fiber', sat_fat_g: 'saturated fat', added_sugar_g: 'added sugar' };
 export const COUNT_CLASS = { red_meat_slots: 'red_meat', fish_slots: 'fish' };
 export const STORE_COLUMNS = ['key', 'name', 'kind', 'list_threshold_meals', 'countdown', 'cadence', 'note'];
 export const STORE_KINDS = ['warehouse', 'grocery', 'market'];
@@ -213,10 +223,19 @@ function usesOf(v, where, items, portions = 1, plate = 1) {
     const n = num(strip(q));
     // at a plate other than 1 the product is rounded to four places (Python's round), so 16 * 0.8
     // is 12.8; at 1 the arithmetic is the file's own and is left exactly as it was
-    out[k] = n === null ? null : (plate === 1 ? n * portions : pyRound(n * portions * plate, 4));
+    let v = n === null ? null : (plate === 1 ? n * portions : pyRound(n * portions * plate, 4));
+    // a thing counted, not measured, leaves the kitchen in the grain the recipe wrote it in: one
+    // fillet, three eggs, never 0.85 of one; half an avocado stays a half
+    if (v !== null && COUNTABLE_UNITS.includes(items[k].unit)) v = snap(v, grain(n));
+    out[k] = v;
   }
   return out;
 }
+
+/* The grain a recipe counts a thing in (wholes, halves, quarters; null when finer), and a scaled
+   count snapped to it, never below one grain (plate_config._grain, _snap). */
+function grain(q0) { for (const g of [1, 0.5, 0.25]) if (q0 / g === Math.trunc(q0 / g)) return g; return null; }
+function snap(q, g) { if (g === null || q === Math.trunc(q)) return q; return Math.max(g, pyRound(pyRound(q / g) * g, 4)); }
 
 /* A nutrition column at the plate: the recipe's own figure at 1, else scaled and rounded to a
    whole unit (Python's round, half to even), because a plate is eaten whole. */
@@ -331,7 +350,10 @@ export function loadRegimens(home) {
     const where = 'regimens.csv ' + r.id;
     const reg = { id: r.id, name: get(r, 'name') || r.id, allows: tagsOf(get(r, 'allows', ''), where),
       excludes: tagsOf(get(r, 'excludes', ''), where), unmoved_by: list(get(r, 'unmoved_by', '')),
-      note: get(r, 'note', '') };
+      unheld: list(get(r, 'unheld', '')), note: get(r, 'note', '') };
+    for (const k of reg.unheld) {
+      if (!UNHELD_KEYS.includes(k)) throw new ConfigError(where + ': unheld ' + pyReprStr(k) + ' is not a target a plan can leave out (' + UNHELD_KEYS.join(', ') + ')');
+    }
     for (const k of Object.keys(COUNT_TAGS)) {
       try {
         reg[k] = num(get(r, k, ''));
@@ -418,6 +440,10 @@ function countsAs(meal, key) {
 
 /* What a plan cannot fill from the catalog, in plain phrases for the picker (plate_config.py's
    plan_gaps: the same rule, the same words). */
+/* A slot's name before its flourish: "Dessert bowl — sweet, cold, on purpose" is "Dessert bowl"
+   in a sentence about it (plate_config.short_name). */
+export function shortName(name) { return String(name || '').split(' — ')[0]; }
+
 export function planGaps(regimen, meals, declared, cold, rotation_occasion) {
   const out = [];
   const fit = meals.filter(m => declared[m.id] && !leavesOut(m.contains, regimen).length);
@@ -425,7 +451,7 @@ export function planGaps(regimen, meals, declared, cold, rotation_occasion) {
     const total = sl.opts.length;
     let kept = 0;
     for (const o of sl.opts) if (!leavesOut(o.contains, regimen).length) kept += 1;
-    const name = lower(sl.name);
+    const name = lower(shortName(sl.name));
     if (kept === 0 && sl.occasion !== rotation_occasion) out.push('no ' + name + ' fits');
     else if (kept === 1 && total > 1) out.push('one ' + name + ' option');
   }
@@ -597,8 +623,13 @@ export function load(home, opts = {}) {
   }
 
   const kits = {};
+  // a kit and a pantry row carry what they are made of, and the plan and the chips leave them
+  // out by the same rule as a cold option; a file from before the column keeps every row
   for (const r of rows(home, 'kits')) {
-    if (get(r, 'id')) kits[r.id] = { id: r.id, name: req(r, 'name'), instruction: get(r, 'instruction', '') };
+    if (get(r, 'id')) {
+      const ktags = tagsOf(get(r, 'tags', ''), 'kits.csv ' + r.id);
+      kits[r.id] = { id: r.id, name: req(r, 'name'), instruction: get(r, 'instruction', ''), tags: ktags, excluded: leavesOut(ktags, eff) };
+    }
   }
 
   const meals = [], seen_slots = new Map(), declared = {};
@@ -634,7 +665,8 @@ export function load(home, opts = {}) {
       steps: list(get(r, 'steps', '')), needs, hands_on: num(get(r, 'hands_on')),
       cooking: {}, equipment: '', mode: '', temp_f: null, minutes: 0, tray: '', why_not: '',
       contains, excluded: leavesOut(contains, eff),
-      in_pool: declared[r.id], note: get(r, 'note', '') });
+      excluded_items: Object.keys(uses).filter(k => items[k].tags.some(t => leavesOut(contains, eff).includes(t))),
+      in_pool: declared[r.id], declared: declared[r.id], note: get(r, 'note', '') });
   }
   if (seen_slots.size !== SLOTS) {
     throw new ConfigError('meals.csv must fill slots 1-' + SLOTS + '; found ' + pyList(pySorted([...seen_slots.keys()])));
@@ -766,9 +798,14 @@ export function load(home, opts = {}) {
     const contains = containsOf(uses, items);
     const off = leavesOut(contains, eff);
     if (occ_id === rotation_occasion && !solo) { put_away = true; continue; }   // the cold block, put away beside another meal
+    // the slot is named by its first option the plan keeps (plate_config.load): a bowl whose sweet
+    // options the plan leaves out is not called "Dessert bowl" over plain yogurt
     if (!has(by_slot, r.slot)) {
-      by_slot[r.slot] = { id: r.slot, name: get(r, 'slot_name', '') || r.slot, occasion: occ_id, opts: [] };
+      by_slot[r.slot] = { id: r.slot, name: get(r, 'slot_name', '') || r.slot, occasion: occ_id, opts: [], named_by_kept: !off.length };
       cold.push(by_slot[r.slot]);
+    } else if (!off.length && !by_slot[r.slot].named_by_kept) {
+      by_slot[r.slot].name = get(r, 'slot_name', '') || r.slot;
+      by_slot[r.slot].named_by_kept = true;
     }
     if (off.length) cold_excluded.push({ slot: r.slot, label: req(r, 'label') });
     by_slot[r.slot].opts.push({ label: req(r, 'label'), kcal: nut(num(get(r, 'kcal'), 0), plate), protein_g: nut(num(get(r, 'protein_g'), 0), plate),
@@ -776,6 +813,7 @@ export function load(home, opts = {}) {
       uses, portions: occ_by_id[occ_id].portions, contains, excluded: off,
       excluded_items: Object.keys(uses).filter(k => items[k].tags.some(t => off.includes(t))) });
   }
+  for (const sl of cold) delete sl.named_by_kept;
   if (!cold.length && !put_away) throw new ConfigError('cold_slots.csv has no rows');
   // In occasion order, so the flat list every consumer walks and the cards the page draws cannot
   // disagree about what comes first.
@@ -788,7 +826,12 @@ export function load(home, opts = {}) {
     r.gaps = planGaps(r, meals, declared, cold, rotation_occasion);
   }
 
-  const flavor = rows(home, 'flavor_pantry').filter(r => get(r, 'id')).map(r => ({ id: r.id, name: req(r, 'name'), note: get(r, 'note', '') }));
+  const flavor = [];
+  for (const r of rows(home, 'flavor_pantry')) {
+    if (!get(r, 'id')) continue;
+    const ftags = tagsOf(get(r, 'tags', ''), 'flavor_pantry.csv ' + r.id);
+    flavor.push({ id: r.id, name: req(r, 'name'), note: get(r, 'note', ''), tags: ftags, excluded: leavesOut(ftags, eff) });
+  }
   const zones = [...ZONE_ORDER, ...sortedSet(Object.values(items).map(it => it.zone).filter(z => !ZONE_ORDER.includes(z)))];
   return { meals, baseline, plan_b, kits, cold,
     items, item_order, stores, store_order,
