@@ -38,13 +38,16 @@ export const PLATE_MIN = 0.5, PLATE_MAX = 1.4, PLATE_STEP = 0.05;
 export const TARGET_BANDS = { kcal: [500, 10000], protein_g: [20, 500], fiber_g: [0, 200], sat_fat_g: [0, 300],
                               added_sugar_g: [0, 300], deficit_kcal: [-2000, 2000] };
 export const DIET_COLUMNS = ['key', 'value', 'note'];
-export const REGIMEN_COLUMNS = ['id', 'name', 'allows', 'excludes', 'red_meat_slots', 'fish_slots', 'beans_slots', 'note'];
+export const REGIMEN_COLUMNS = ['id', 'name', 'allows', 'excludes', 'red_meat_slots', 'fish_slots', 'beans_slots', 'unmoved_by', 'note'];
 export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 'note'];
 // The food groups an ingredient can belong to. A regimen speaks in these, so a tag outside the
 // list is a typo and is refused rather than quietly excluding nothing.
 export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy'];
 // The food behind each count the planner keeps. Red meat in this catalog is beef.
 export const COUNT_TAGS = { red_meat_slots: 'beef', fish_slots: 'fish', beans_slots: 'beans' };
+// The same counts as the picker says them and as the planner counts them (plate_config.py)
+export const COUNT_WORDS = { red_meat_slots: 'beef', fish_slots: 'fish', beans_slots: 'bean' };
+export const COUNT_CLASS = { red_meat_slots: 'red_meat', fish_slots: 'fish' };
 export const STORE_COLUMNS = ['key', 'name', 'kind', 'list_threshold_meals', 'countdown', 'cadence', 'note'];
 export const STORE_KINDS = ['warehouse', 'grocery', 'market'];
 export const STORE_ITEM_COLUMNS = ['store', 'item', 'pack', 'buy', 'note'];
@@ -319,14 +322,16 @@ function containsOf(uses, items) {
   return sortedSet(all);
 }
 
-/* regimens.csv in file order. An older home without the file has none. */
+/* regimens.csv in file order, with the markers each plan is unmoved by (a food rule reading one
+   of them stands down on that plan). An older home without the file has none. */
 export function loadRegimens(home) {
   const out = [];
   for (const r of (rows(home, 'regimens', true) || [])) {
     if (!get(r, 'id')) continue;
     const where = 'regimens.csv ' + r.id;
     const reg = { id: r.id, name: get(r, 'name') || r.id, allows: tagsOf(get(r, 'allows', ''), where),
-      excludes: tagsOf(get(r, 'excludes', ''), where), note: get(r, 'note', '') };
+      excludes: tagsOf(get(r, 'excludes', ''), where), unmoved_by: list(get(r, 'unmoved_by', '')),
+      note: get(r, 'note', '') };
     for (const k of Object.keys(COUNT_TAGS)) {
       try {
         reg[k] = num(get(r, k, ''));
@@ -403,6 +408,36 @@ export function leavesOut(tags, regimen) {
     for (const t of pyIter(tags)) if (!allow.has(t)) bad.add(t);
   }
   return pySorted([...bad]);
+}
+
+/* whether a meal is one of the nights a count asks for, the way the planner counts them */
+function countsAs(meal, key) {
+  if (key === 'beans_slots') return (meal.contains || []).includes('beans');
+  return meal.protein_class === COUNT_CLASS[key];
+}
+
+/* What a plan cannot fill from the catalog, in plain phrases for the picker (plate_config.py's
+   plan_gaps: the same rule, the same words). */
+export function planGaps(regimen, meals, declared, cold, rotation_occasion) {
+  const out = [];
+  const fit = meals.filter(m => declared[m.id] && !leavesOut(m.contains, regimen).length);
+  for (const sl of cold) {
+    const total = sl.opts.length;
+    let kept = 0;
+    for (const o of sl.opts) if (!leavesOut(o.contains, regimen).length) kept += 1;
+    const name = lower(sl.name);
+    if (kept === 0 && sl.occasion !== rotation_occasion) out.push('no ' + name + ' fits');
+    else if (kept === 1 && total > 1) out.push('one ' + name + ' option');
+  }
+  if (fit.length < 2 * SLOTS) out.push(fit.length + ' dinners fit, two rotations need ' + (2 * SLOTS));
+  for (const key of Object.keys(COUNT_TAGS)) {
+    const asked = regimen[key];
+    if (asked == null || asked <= 0) continue;
+    let n = 0;
+    for (const m of fit) if (countsAs(m, key)) n += 1;
+    if (n < asked) out.push('asks for ' + numstr(asked) + ' ' + COUNT_WORDS[key] + ' night' + (asked === 1 ? '' : 's') + ', ' + n + ' fit');
+  }
+  return out;
 }
 
 /* [shop, picks] from the profile's `stores` and `store_picks` rows. */
@@ -750,6 +785,7 @@ export function load(home, opts = {}) {
     r.leaves_out_meals = meals.filter(m => leavesOut(m.contains, r).length).map(m => m.id);
     r.leaves_out_cold = [];
     for (const sl of cold) for (const o of sl.opts) if (leavesOut(o.contains, r).length) r.leaves_out_cold.push(o.label);
+    r.gaps = planGaps(r, meals, declared, cold, rotation_occasion);
   }
 
   const flavor = rows(home, 'flavor_pantry').filter(r => get(r, 'id')).map(r => ({ id: r.id, name: req(r, 'name'), note: get(r, 'note', '') }));

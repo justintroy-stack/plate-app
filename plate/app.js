@@ -101,6 +101,16 @@ const OCC=CFG.occasions||[{id:'dinner',name:'Dinner',rotation:true}], ROT=(OCC.f
 const occName=id=>{const o=OCC.find(x=>x.id===id);return o?o.name:id;};
 const occPortions=id=>{const o=OCC.find(x=>x.id===id);return o&&o.portions?o.portions:PORTIONS;};
 const planName=()=>REG?REG.name.toLowerCase():'chosen';
+/* a plan in one line for the interview: its own note (which says what it is unmoved by) and
+   what it cannot fill from the catalog, said before it is chosen (plate_config's plan_gaps) */
+const planLine=r=>!r?'Any meal in the catalog.':(r.note||'')+((r.gaps||[]).length?' Not a whole day yet: '+r.gaps.join('; ')+'.':'');
+/* how many more times a meal or an option the plan leaves out comes round before the stock
+   behind it is gone: the smallest whole count over what it uses, the protein the labs gate a
+   meal on, the items the plan leaves out for a cold option; null when there is nothing to count */
+function staysFor(x){const keys=x.protein_item?[x.protein_item]:(x.excluded_items&&x.excluded_items.length)?x.excluded_items:Object.keys(x.uses||{});let n=null;
+  keys.forEach(k=>{const u=(x.uses||{})[k];if(!u)return;const t=Math.floor((S.inv[k]||0)/u);if(n==null||t<n)n=t;});return n;}
+const staysLine=x=>{const n=staysFor(x);return n===0?'The stock it was eating is gone, so it leaves at the next log.':
+  'It stays until the stock it was eating is gone'+(n==null?'':', about '+n+' more time'+(n===1?'':'s'))+'.';};
 /* How many people a thing is cooked for, said only when it is more than one: a screen that
    announces "1 person" to somebody eating alone is noise. `cookingFor()` is the mid-sentence
    phrase ("cooking for 3"), `peopleWord()` the noun phrase ("3 people") for a standalone
@@ -451,6 +461,8 @@ window.act={
      setTimeout(()=>location.reload(),350);
    }catch(e){SMSG=e.message;render();}},
  regimenPick(v){RSEL=v;RMSG='';render();},
+ /* the interview's plan line follows the picker without a redraw (a redraw would reset the rail) */
+ frPlan(v){const el=document.getElementById('fr-planline');if(el)el.textContent=planLine(REGS.find(x=>x.id===v)||null);},
  /* Who eats: the household number and any per-occasion override, saved the way the store
     picker is: post, then fetch the page again, since the resolved catalog rides inside it. */
  async saveWhoEats(){const g=id=>document.getElementById(id);
@@ -686,9 +698,13 @@ window.act={
    rows.forEach(r=>setInv(r.k,(S.inv[r.k]||0)+r.units));
    delete TRIP[sk];persist();render();chime('buy');say(st.name+' trip logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
  closeNote(){NOTE=null;render();},
- /* the guide: Skip puts the step it is showing behind you for good; the line finds the control */
+ /* the guide: Skip puts the step it is showing behind you for good, and carries on as a tour
+    from there, the next step in order whatever the state has done, the way Show me around again
+    does. On a first run only the one due step is lit, so a Skip on it used to empty the queue
+    and land on the closing panel after "1 of 5"; the line finds the control */
  guideSkip(){if(GCLOSING){act.guideDone();return;}
-   const p=guidePlan(guideView());if(p&&p.key&&!S.seen.includes(p.key))S.seen.push(p.key);persist();guideSync();},
+   const p=guidePlan(guideView());if(p&&p.key&&!S.seen.includes(p.key))S.seen.push(p.key);
+   if(!S.tour)S.tour=true;persist();guideSync();},
  /* Done on the closing panel: the word was said; Show me around again brings it back */
  guideDone(){if(!S.seen.includes('guide_close'))S.seen.push('guide_close');GLATER=[];persist();guideSync();},
  /* Show me around again: every step forgotten, the tour on, Tonight first. The guide was once
@@ -1002,6 +1018,11 @@ function dietBy(){
     if(a.changed){e.drive=true;e.moves.push([tlabel(a.target),a.before,a.after,a.note||'',a.target]);}
     else if(!e.why)e.why=a.note||'This asks for a change another marker has already made, so nothing moves twice.';
   });
+  /* a rule whose condition is met and that the plan does not let move dinner (a marker the plan
+     is unmoved by, or a count whose food it leaves out): the marker says so instead of nothing */
+  (MK.diet.notes||[]).forEach(n=>{if(!n.not_applicable)return;
+    const e=by[n.marker]||(by[n.marker]={drive:false,moves:[],why:''});
+    e.stood=true;if(!e.why)e.why=n.note||'';});
   return by;
 }
 
@@ -1040,11 +1061,13 @@ function heroState(m,d,lens){const parts=[];
   else if(m.vs_target==='in')parts.push('Inside the '+m.target+' the '+lens+' view aims for.');
   else parts.push('No researched target for it; judged against the range the lab printed.');
   if(d&&d.drive)parts.push('This is the marker that changed dinner.');
+  else if(d&&d.stood)parts.push('The '+planName()+' plan does not let it move dinner.');
   return parts.join(' ');}
 /* a pill only when there is something to say, and one thing at a time: its place in the
    plan first, then the lab's own flag, then the target */
 function statePill(m,dt){
   if(dt&&dt.drive)return '<span class="pill" data-family="plum"><i class="dot"></i>changed dinner</span>';
+  if(dt&&dt.stood)return '<span class="pill pill--ghost">dinner stays</span>';
   if(dt)return '<span class="pill pill--ghost">same lever</span>';
   if(m.lab_flag)return '<span class="pill" data-family="ember"><i class="dot"></i>lab flag '+esc(m.lab_flag)+'</span>';
   if(m.vs_target==='above'||m.vs_target==='below')return '<span class="pill" data-family="plum">'+m.vs_target+' target</span>';
@@ -1093,6 +1116,7 @@ function markerRow(m,dt,pre){
   if(dt){
     body+='<dl class="facts">';
     if(dt.drive)dt.moves.forEach(v=>{body+='<dt>'+esc(v[0])+'</dt><dd><b>'+esc(v[1])+' → '+esc(v[2])+esc(tunit(v[4]))+'.</b> '+esc(v[3])+'</dd>';});
+    else if(dt.stood)body+='<dt>Dinner stays</dt><dd>'+esc(dt.why)+'</dd>';
     else body+='<dt>Same lever</dt><dd>'+esc(dt.why)+'</dd>';
     body+='</dl>';
   }
@@ -1142,9 +1166,9 @@ function readsCard(){
   const reads=(MK&&MK!=='none'&&MK.diet&&MK.diet.reads)||[];
   if(!reads.length)return '';
   let h='<section class="card"><div class="split"><span class="t-label">What a report can move</span><span class="mono" style="color:var(--ink-3)">'+reads.length+' markers</span></div>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">The food rules read these. Ask for the panel by name; the cost is the lab\'s tier, not a price.</p><div class="rows">';
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">The food rules read these and nothing else: every other marker on a report is charted and moves nothing. Ask for the panel by name; the cost is the lab\'s tier, not a price.</p><div class="rows">';
   reads.forEach(r=>{h+='<div class="row"><span class="row__body"><span class="row__title">'+esc(r.display)+'</span>'+
-    '<span class="row__meta">'+esc(r.panel||'its own panel')+' · moves '+esc(list(r.targets.map(t=>tlabel(t).toLowerCase())))+' when '+esc(list(r.conditions.map(c=>COND[c]||c)))+'</span></span>'+
+    '<span class="row__meta">'+esc(r.panel||'its own panel')+' · '+(r.unmoved?'charted; the '+esc(planName())+' plan does not let it move dinner':'moves '+esc(list(r.targets.map(t=>tlabel(t).toLowerCase())))+' when '+esc(list(r.conditions.map(c=>COND[c]||c))))+'</span></span>'+
     (r.cost?'<span class="pill pill--ghost">'+esc(r.cost)+' cost</span>':'')+'</div>';});
   return h+'</div></section>';
 }
@@ -1220,8 +1244,10 @@ function viewOverview(){
       d.moves.forEach(v=>{top+='<div class="row"><span class="row__body"><span class="row__title">'+esc(v[0])+'</span><span class="row__meta">was '+esc(v[1])+esc(tunit(v[4]))+'</span>'+
         (EXON&&v[3]?'<span class="row__note">'+esc(v[3])+'</span>':'')+'</span><b class="row__val">'+esc(v[2])+esc(tunit(v[4]))+'</b></div>';});
       top+='</div>';});
-    const same=Object.keys(by).filter(k=>!by[k].drive).map(k=>{const m=s.markers.find(x=>x.marker===k);return m?m.display:k;});
+    const nameOf=k=>{const m=s.markers.find(x=>x.marker===k);return m?m.display:k;};
+    const same=Object.keys(by).filter(k=>!by[k].drive&&!by[k].stood).map(nameOf), stood=Object.keys(by).filter(k=>!by[k].drive&&by[k].stood).map(nameOf);
     if(same.length)top+='<p class="t-note" style="margin-top:var(--s3)">'+esc(list(same))+' ask'+(same.length===1?'s':'')+' for the same lever'+(same.length===1?'':'s')+', so nothing moves twice.</p>';
+    if(stood.length)top+='<p class="t-note" style="margin-top:var(--s3)">'+esc(list(stood))+' would move it, and the '+esc(planName())+' plan does not let '+(stood.length===1?'it':'them')+'. The number and the trend still show.</p>';
     if(drivers.length>1||(drivers.length&&drivers[0]!==hero))top+='<button class="btn btn--sm btn--quiet" type="button" data-fk="drv" style="margin-top:var(--s2);padding-left:0" onclick="act.jumpTo(\''+esc(drivers[drivers.length-1].marker)+'\')">See '+esc(drivers[drivers.length-1].display)+' '+icon('arrow')+'</button>';
     top+='</section>';
   }
@@ -1306,10 +1332,12 @@ function wayIn(fam,ico,label,num,unit,note,go){
    itself the stepper that turns the slot. A tick tracks progress and moves no stock. */
 function coldRow(c,pre,stepper){
   const on=S.checked.includes(c.id), id=pre+esc(c.id);
+  /* an option the plan leaves out stays while its stock lasts, and says for how long */
+  const off=(c.excluded&&c.excluded.length)?(() => {const n=staysFor(c);return 'not on your plan'+(n==null?'':n===0?', last time':', '+n+' more');})():'';
   return '<div class="row"><input class="tick tick--done" type="checkbox" id="'+id+'"'+(on?' checked':'')+
     ' data-fk="chk:'+esc(c.id)+'" onchange="act.toggle(\''+esc(c.id)+'\')">'+
     '<label class="row__body" for="'+id+'"><span class="row__title">'+esc(c.label)+'</span>'+
-    (c.name&&c.name!==c.id?'<span class="row__meta">'+esc(c.name)+'</span>':'')+'</label>'+
+    ((c.name&&c.name!==c.id)||off?'<span class="row__meta">'+esc([c.name&&c.name!==c.id?c.name:'',off].filter(Boolean).join(' · '))+'</span>':'')+'</label>'+
     '<span class="row__val">'+c.protein_g+' g</span>'+
     (stepper?'<span class="step2"><button class="iconbtn" type="button" data-fk="cyc:'+esc(c.id)+'" onclick="act.cycle(\''+esc(c.id)+'\')" '+
       'aria-label="Change this slot">'+icon('cycle')+'</button></span>':'')+'</div>';
@@ -1333,7 +1361,7 @@ function viewTonight(F){
       '<div><div class="v">'+(m.equipment?timeParts(m.minutes)[0]:'—')+'<span class="u">'+(m.equipment?timeParts(m.minutes)[1]:'min')+'</span></div><div class="k">Time</div></div>'+
       '<div><div class="v word">'+esc(m.mode)+'</div><div class="k">Mode</div></div>'+
     '</div>'+(m.why_not?'<p class="mealsub">Not for this kitchen as written: '+esc(m.why_not)+'.</p>':'')+
-    (m.excluded&&m.excluded.length?'<p class="mealsub">'+esc(notOn(m))+' It stays until the stock it was eating is gone.</p>':'')+
+    (m.excluded&&m.excluded.length?'<p class="mealsub">'+esc(notOn(m))+' '+esc(staysLine(m))+'</p>':'')+
     '</div></section>';
 
   top+=noteCard();
@@ -1526,7 +1554,7 @@ function rotRow(F,i){
   let note='';
   if(changed)note='Was '+was.name+'. The '+((sw&&(sw.gate_name||sw.gate_item))||'stock')+' runs out before this, so your labs take the slot.';
   else if(pend.length)note='Becomes '+pend[0].to_name+' once the '+(pend[0].gate_name||pend[0].gate_item)+' is gone.';
-  else if(x.excluded&&x.excluded.length)note=notOn(x);
+  else if(x.excluded&&x.excluded.length)note=notOn(x)+' '+staysLine(x);
   else if(x.why_not)note='Not for this kitchen as written: '+x.why_not+'.';
   let pill='';
   if(i===0)pill='<span class="pill" data-family="sprout"><i class="dot"></i>tonight</span>';
@@ -2260,7 +2288,8 @@ async function dinnerAfter(r){
     if(added.length)line='Dinner changes: '+added.map(s=>s.from_name+' becomes '+s.to_name+(s.gate_name?', once the '+s.gate_name+' you have is gone':'')).join('; ')+'.';
     else if(gone.length)line='Dinner: '+gone.map(s=>s.from_name+' stays, the swap to '+s.to_name+' is no longer asked for').join('; ')+'.';
     else if(now.length)line='Dinner is unchanged: the swap already waiting still stands.';
-    else line='Dinner stays as it is: the rotation already meets what your labs ask for.';
+    else{const d=await api('/api/diet').catch(()=>null), stood=[...new Set(((d&&d.notes)||[]).filter(n=>n.unmoved).map(n=>n.display))];
+      line=stood.length?'Dinner stays as it is: the '+planName()+' plan does not let '+list(stood)+' move dinner.':'Dinner stays as it is: the rotation already meets what your labs ask for.';}
     if(ING===r){r.dinner={line:line,changed:added.length>0||gone.length>0};render();}}
   catch(e){}
 }
@@ -2284,6 +2313,7 @@ function viewRegimen(){
     const asks=[[r.red_meat_slots,'beef'],[r.fish_slots,'fish'],[r.beans_slots,'bean']].filter(x=>x[0]!=null).map(x=>x[0]+' '+x[1]);
     h+='<p class="t-body" style="margin-top:var(--s3);color:var(--ink)">'+esc(r.note||'')+(r.excludes.length?' Leaves out '+esc(list(r.excludes))+'.':'')+(r.allows.length?' Only '+esc(list(r.allows))+'.':'')+
       (asks.length?' Asks for '+esc(asks.join(', '))+' nights per cycle.':'')+'</p>';
+    if((r.gaps||[]).length)h+='<p class="t-note" style="margin-top:var(--s2)">Not a whole day yet: '+esc(r.gaps.join('; '))+'.</p>';
     if(fit(r)===0)h+='<div class="callout warn" style="margin-top:var(--s3)">No meal in the catalog fits this plan yet, so the rotation would stand as it is until one is added.</div>';
     else if(gone.length)h+='<p class="t-note" style="margin-top:var(--s2)">'+gone.length+' of your '+N+' rotation nights would change ('+esc(names.join(', '))+'), each once the stock it was eating is gone.</p>';
     if((r.leaves_out_cold||[]).length)h+='<p class="t-note" style="margin-top:var(--s2)">From the cold block: '+esc(r.leaves_out_cold.join(', '))+'.</p>';
@@ -2473,18 +2503,22 @@ function viewFirstRun(){
      it is complete; and the bar that rises with the target line and the button once it is. The
      rail sits before the stack, which is a grid of named areas that would place it last. */
   let h='<div class="fr-rail" id="frrail" aria-hidden="true">'+FR_CARDS.map((c,i)=>'<i data-i="'+i+'"></i>').join('')+'<span id="frlabel">Set up your kitchen</span></div>';
-  h+='<div class="stack">';
+  h+='<div class="stack stack--top">';
   h+='<section class="card card--lit hero a-hero" data-family="sprout"><div class="hero-in">'+
     '<h1 class="mealname">Set up your kitchen</h1>'+
     '<p class="mealsub">Seven questions, then a rotation and a shopping list built for the way you eat, with plates sized for you.</p>'+
     '<p class="mealsub" style="margin-top:var(--s2)">'+esc(PRIVACY)+'</p>'+
     (LOCAL&&!standalone()?'<p class="mealsub" style="margin-top:var(--s2)">'+esc(INSTALL)+'</p>':'')+'</div></section>';
   h+=storyCard({cls:'a-main',id:'story-fr'});
+  /* the questions, one pile in the aside area: a bare card in the named-area grid is auto-placed
+     into shared rows, and on the Mac the tall How you eat card left a void beside it */
+  h+='<div class="pile a-aside">';
   h+='<section class="card fr-card" id="fr-c0"><span class="t-label">How you eat</span>'+
-    '<div class="formgrid" style="margin-top:var(--s2)"><div class="field wide"><span>Plan</span><select id="fr-regimen" data-fk="fr-regimen">'+
+    '<div class="formgrid" style="margin-top:var(--s2)"><div class="field wide"><span>Plan</span><select id="fr-regimen" data-fk="fr-regimen" onchange="act.frPlan(this.value)">'+
     REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===regDefault?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' of '+total+' meals fit</option>').join('')+
     '<option value=""'+(regDefault===''?' selected':'')+'>No plan: any meal in the catalog</option></select></div>'+
     '<div class="field"><span>People</span><input type="number" id="fr-people" data-fk="fr-people" min="1" max="100" step="1" value="'+esc(fmt(PORTIONS))+'"></div></div>'+
+    '<p class="t-note" id="fr-planline" style="margin:var(--s2) 0 0">'+esc(planLine(REGS.find(x=>x.id===regDefault)||null))+'</p>'+
     '<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat. A meal or a cold option that has it leaves the pool.</p>'+fieldAvoid('fr-avoid-',AVOID)+'</section>';
   h+='<section class="card fr-card" id="fr-c1"><span class="t-label">What you cook on</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A meal is written for each of these. Tick what your kitchen has.</p>'+
@@ -2508,7 +2542,7 @@ function viewFirstRun(){
     '<div class="filepick"><input type="file" id="rst0" data-fk="rst0" accept=".plate,.bin,application/octet-stream">'+
     '<button class="btn" type="button" data-fk="rst0btn" onclick="act.restore(\'rst0\')">Restore from a backup</button></div>'+
     (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
-  return h+'</div>';
+  return h+'</div></div>';
 }
 /* the five cards of the interview, in order, and what the rail says beside each */
 const FR_CARDS=['How you eat','What you cook on','When you eat','Where you shop','About you'];

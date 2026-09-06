@@ -253,8 +253,9 @@ export function calibrateCalories(home, diet) {
 /* The markers the food rules read, one entry each, with the panel and the cost tier the retest
    policy gives them and what a firing rule moves. A note rule and the calorie recalibration
    read nothing a lab prints. */
-export function rulesRead(rules, registry, policy) {
+export function rulesRead(rules, registry, policy, regimen = null) {
   const out = [], seen = {};
+  const unmoved = (regimen && regimen.unmoved_by) || [];
   for (const r of rules) {
     if (r.target === 'note' || r.adjustment === 'recalibrate') continue;
     const m = req(r, 'marker');
@@ -262,7 +263,7 @@ export function rulesRead(rules, registry, policy) {
     if (e === null) {
       const pol = has(policy, m) ? policy[m] : null;
       e = seen[m] = { marker: m, display: registry.display(m), panel: pol ? pol.order_panel : '',
-                      cost: pol ? pol.cost_tier : '', conditions: [], targets: [] };
+                      cost: pol ? pol.cost_tier : '', conditions: [], targets: [], unmoved: unmoved.includes(m) };
       out.push(e);
     }
     if (!e.conditions.includes(r.condition)) e.conditions.push(r.condition);
@@ -305,6 +306,16 @@ export function buildDiet(home, store, registry) {
     }
     const key = rule.target;
     if (!has(targets, key)) continue;
+    if (regimen && (regimen.unmoved_by || []).includes(m)) {
+      // the plan is unmoved by this marker: the food rule stands down, so dinner stays what the plan chose
+      entry.target = key;
+      entry.not_applicable = true;
+      entry.unmoved = true;
+      entry.note = 'Not applicable: the ' + lower(req(regimen, 'name')) + ' plan does not let ' + registry.display(m) +
+                   ' move dinner, so dinner stays as it is.';
+      notes.push(entry);
+      continue;
+    }
     if (regimen && has(COUNT_TAGS, key) && leavesOut([COUNT_TAGS[key]], regimen).length) {
       // the food behind this count is not on the regimen, so the rule has nothing to move
       entry.target = key;
@@ -331,5 +342,5 @@ export function buildDiet(home, store, registry) {
   const outStates = {};
   for (const [m, s] of Object.entries(states)) if (s.latest === 'above' || s.latest === 'below') outStates[m] = s;
   return { lens, constraints, regimen, baseline, targets, adjustments: fired, notes, calories: cal, states: outStates,
-           reads: rulesRead(rules, registry, loadPolicy(home)) };
+           reads: rulesRead(rules, registry, loadPolicy(home), regimen) };
 }
