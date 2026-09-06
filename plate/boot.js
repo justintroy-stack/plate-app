@@ -3,30 +3,19 @@
    The page's own script (plate/app.js, lifted out of phone.html untouched) expects three things
    the Python server used to inject ahead of it: window.PLATE_CONFIG, window.storage and
    window.plateEvent. Here they are computed on the device instead. The home folder is read out
-   of IndexedDB into memory, the packaged defaults are seeded where a file is missing (never
-   overwritten, exactly as ensure_home does on disk), the food config and the rotation plan are
+   of IndexedDB into memory, the packaged defaults are seeded where a file is missing and a
+   seeded file the person never changed catches up with this build (seeds.js), the food config and the rotation plan are
    built by the JavaScript twins of the Python modules, every /api/ call the page makes is
    answered from inside the page, and only then does the page's script run. Nothing about a
    person leaves the device. */
 import { loadHome, flush, persist } from './fs.js';
-import { DEFAULTS, SHIPPED, PERSONAL } from './defaults.js';
+import { DEFAULTS, SHIPPED, PERSONAL, LINEAGE } from './defaults.js';
+import { syncSeeds } from './seeds.js';
 import { BUILD } from './build.js';
 import { installApi } from './api.js';
 import { payloadBuilt, getState, setState, recordEvents } from './plate.js';
 
 const $ = (id) => document.getElementById(id);
-
-function seedDefaults(home) {
-  /* the folder layout and the generic config, seeded once; a personal file is only ever seeded empty */
-  let created = 0;
-  for (const name of [...SHIPPED, ...PERSONAL]) {
-    const path = 'config/' + name + '.csv';
-    if (!(name in DEFAULTS) || home.exists(path)) continue;
-    home.write(path, DEFAULTS[name]);
-    created++;
-  }
-  return created;
-}
 
 function stamp(v) {
   /* the storage shim stamped every save with updated_at; the wins rule reads it */
@@ -58,11 +47,15 @@ function loadScript(src) {
     showError('This browser cannot keep your data.', 'Plateside stores everything on the device in IndexedDB, and this browser refused to open it: ' + (e && e.message || e));
     return;
   }
-  const seeded = seedDefaults(home);
-  if (seeded) await flush(home);
+  /* the generic config seeded where a file is missing, a personal file only ever seeded empty,
+     and a shipped file this home was born with and never changed caught up with this build;
+     anything the person changed is theirs and stays (his phone kept the seed it was born with
+     through three builds and a Start over before this) */
+  const { seeded, refreshed } = syncSeeds(home, DEFAULTS, typeof LINEAGE === 'object' && LINEAGE ? LINEAGE : {}, SHIPPED, PERSONAL);
+  if (home.dirty.size) await flush(home);
   persist().catch(() => {});
 
-  const local = { version: BUILD.version, pdfjs: BUILD.pdfjs, files: home.paths().length, firstRun: seeded > 0 && !home.exists('labs/results.csv') };
+  const local = { version: BUILD.version, pdfjs: BUILD.pdfjs, files: home.paths().length, firstRun: seeded.length > 0 && !home.exists('labs/results.csv'), refreshed };
   window.PLATE_LOCAL = local;
 
   /* the same rule the server enforced: a copy of the state is stored only when it beats the

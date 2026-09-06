@@ -146,6 +146,19 @@ function migrateLog(home) {
 
 /* Take the row(s) for one cursor out of the log, keeping a copy first. Returns how many rows
    were removed. */
+/* the passport: how many nights each plate was cooked, from the meal log (plate.tally) */
+export function tally(home) {
+  const out = {};
+  const t = home.read(MEAL_LOG);
+  if (t == null) return out;
+  for (const r of readRows(t)) {
+    const kind = r.kind || '', note = r.note || '', mid = r.meal_id || '';
+    if (!mid || mid === 'extra') continue;
+    if (kind === 'full' || kind === 'plan_b' || kind === '' || kind === 'unknown' || (kind === 'partial' && note.startsWith('hot meal eaten'))) out[mid] = (out[mid] || 0) + 1;
+  }
+  return out;
+}
+
 export function removeLogged(home, cursor) {
   return dropRows(home, r => r.cursor !== String(cursor));
 }

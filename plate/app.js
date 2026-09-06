@@ -13,6 +13,44 @@ const store={
 };
 const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const RM=window.matchMedia?window.matchMedia('(prefers-reduced-motion: reduce)'):{matches:false};
+/* ---- SOUND. A chime owned by the action: a meal logged, a cycle closed, a row catching what
+   fell into it, a shop landing in stock. Synthesised from nothing (no file, no third party): a
+   short sine with a fast decay, the mallet the odometer would make. Behind Sound under You
+   (Appearance), on by default, off with one tap; the choice stays on this device. iOS unlocks
+   audio only inside a tap, so the context is made on the first log and resumed there. Sound is
+   not motion: Reduce Motion stills the sheet and leaves the chime. */
+const SND={ctx:null,K:'lt:sound'};
+function soundOn(){try{return localStorage.getItem(SND.K)!=='off';}catch(e){return true;}}
+function soundSet(v){try{localStorage.setItem(SND.K,v?'on':'off');}catch(e){}}
+function tone(at,hz,dur,gain,type){const c=SND.ctx,o=c.createOscillator(),g=c.createGain();o.type=type||'sine';o.frequency.setValueAtTime(hz,at);
+  g.gain.setValueAtTime(0.0001,at);g.gain.exponentialRampToValueAtTime(gain,at+0.012);g.gain.exponentialRampToValueAtTime(0.0001,at+dur);
+  o.connect(g);g.connect(c.destination);o.start(at);o.stop(at+dur+0.05);}
+function chime(kind){
+  if(!soundOn())return;
+  try{
+    const AC=window.AudioContext||window.webkitAudioContext; if(!AC)return;
+    if(!SND.ctx)SND.ctx=new AC();
+    if(SND.ctx.state==='suspended')SND.ctx.resume();
+    const t=SND.ctx.currentTime+0.02;
+    if(kind==='log'){tone(t,659.25,0.34,0.11);tone(t+0.11,783.99,0.42,0.11);}
+    else if(kind==='cycle'){[523.25,659.25,783.99,1046.5].forEach((hz,i)=>tone(t+i*0.14,hz,i===3?0.9:0.34,0.11));tone(t+0.42,1318.5,0.9,0.05);}
+    else if(kind==='catch'){tone(t,1174.7,0.09,0.035,'triangle');}
+    else if(kind==='buy'){tone(t,783.99,0.3,0.09);tone(t+0.12,659.25,0.38,0.09);}
+  }catch(e){}
+}
+/* a log's sound: the chime now, and the cycle's figure with the ring when the sheet shows it,
+   or on its own under Reduce Motion, when there is no sheet */
+function logSound(closes){chime('log');if(closes&&RM.matches)setTimeout(()=>chime('cycle'),520);}
+/* ---- RINGS. One drawing for every ring: the cycle in the masthead, the cover on Kitchen, the
+   cycle closing on the sheet. Emitted at `from` and filled to `to` on the next frame, so the
+   arc moves only when the value did (fillRings, after each render); with no `from` it sits. */
+function ringSVG(id,from,to,size,width,cls){const r=(size-width)/2,c=2*Math.PI*r,f0=from==null?to:from;
+  return '<svg class="ring'+(cls?' '+cls:'')+'" id="'+id+'" width="'+size+'" height="'+size+'" viewBox="0 0 '+size+' '+size+'" aria-hidden="true">'+
+    '<circle class="ring-t" cx="'+size/2+'" cy="'+size/2+'" r="'+r+'" stroke-width="'+width+'"/>'+
+    '<circle class="ring-a" cx="'+size/2+'" cy="'+size/2+'" r="'+r+'" stroke-width="'+width+'" stroke-dasharray="'+c.toFixed(2)+'" stroke-dashoffset="'+(c*(1-Math.max(0,Math.min(1,f0)))).toFixed(2)+'" data-to="'+(c*(1-Math.max(0,Math.min(1,to)))).toFixed(2)+'"/></svg>';}
+function fillRings(){const arcs=document.querySelectorAll('.ring-a[data-to]');if(!arcs.length)return;
+  requestAnimationFrame(()=>requestAnimationFrame(()=>arcs.forEach(a=>{a.style.strokeDashoffset=a.dataset.to;})));}
+let RINGF=null;   /* the masthead ring as last painted, so a log fills it from where it was */
 const icon=(n,cls)=>'<svg class="i'+(cls?' '+cls:'')+'" aria-hidden="true"><use href="#i-'+n+'"/></svg>';
 /* Two hosts serve this page: the Mac's server injects the config, and the client-side build
    computes it on the device (plate/boot.js). The engine is the same; only where the files live
@@ -93,7 +131,7 @@ const notOn=x=>{const av=(x.excluded||[]).filter(t=>AVOID.includes(t));return av
 const PLAN=CFG.plan||null, SWAPS=PLAN?PLAN.swaps:[], SWAP={};SWAPS.forEach(s=>SWAP[s.key]=s);
 const FULL={},EMPTY={};IORDER.forEach(k=>{FULL[k]=I[k].pack;EMPTY[k]=0;});
 
-let S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:[],init:false,pending:{},applied:[],gate0:{},seen:[],setup:false},
+let S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:[],init:false,pending:{},applied:[],gate0:{},seen:[],setup:false,tally:{}},
     tab='tonight',partial=false,pOven=false,planB=false;
 /* A landed swap is the loudest thing this app has to say and it happens perhaps twice a year,
    so applyDue() no longer announces it inline: it queues, and the next render decides how to
@@ -245,6 +283,9 @@ function snapshot(kind){const m=activeMeal();
 /* ---- each logged meal is reported with what was actually eaten (kcal and protein as eaten) */
 function report(kind,hot,coldIds){
   const slot=mealAt(0),m=activeMeal();let kcal=0,pro=0;
+  /* the passport: a plate that was cooked is stamped, once per night it was, whatever kind of
+     night (a partial with the hot meal eaten counts; a Plan B stamps the Plan B plate) */
+  if(hot){S.tally=S.tally||{};S.tally[m.id]=(S.tally[m.id]||0)+1;if(S.last)S.last.cooked=true;}
   if(hot){kcal+=m.kcal;pro+=m.protein_g;}
   coldAt(0).forEach(c=>{if(coldIds.includes(c.id)){kcal+=c.kcal;pro+=c.protein_g;}});
   let note=kind==='full'?'ate it all':kind==='plan_b'?'Plan B instead of '+slot.name:(hot?'hot meal eaten':'hot meal not eaten')+'; cold: '+(coldIds.join(', ')||'none');
@@ -393,6 +434,9 @@ window.act={
      HIST=null;MK=null;DRAW=null;TREND=null;MSG='';say('Saved.');
    }catch(e){MSG=e.message;}
    render();if(MK===null)loadMarkers();},
+ sound(v){soundSet(v);render();if(v)chime('log');},
+ /* the tier's line follows the select before Save, so a person reads what they are choosing */
+ tierWord(v){const el=document.getElementById('tierline');if(el&&TIERWORD[v])el.textContent=tierLine(v);},
  storeToggle(sk){const P=spick(),on=new Set(P.shop);on.has(sk)?on.delete(sk):on.add(sk);P.shop=SCAT.filter(s=>on.has(s));SMSG='';render();},
  storePick(k,sk){spick().picks[k]=sk;SMSG='';render();},
  /* The catalog is resolved on the Mac and rides inside the page, so a saved choice fetches
@@ -560,7 +604,7 @@ window.act={
    snapshot(planB?'plan_b':'full');
    report(planB?'plan_b':'full',true,SLOTS.map(sl=>sl.id));
    const wasB=planB,before={...S.inv};planB=false;
-   deduct(draw);S.cursor++;S.checked=[];persist();render();
+   deduct(draw);S.cursor++;S.checked=[];persist();render();logSound(S.cursor%N===0);
    const lead=wasB?'Plan B logged. The freezer stayed sealed.':'Logged. Stock updated.';
    TRADED=null;say(lead,logLine(lead));fxSettle(settleInfo(draw,before,wasB?'Plan B: the freezer stayed sealed':'Ate it all'));},
  openPartial(){partial=true;pOven=false;EXTRA=false;render();},
@@ -581,7 +625,7 @@ window.act={
    snapshot(pOven&&planB?'plan_b':'partial');
    report(pOven&&planB?'plan_b':'partial',pOven,[...S.checked]);
    const before={...S.inv};planB=false;
-   deduct(draw);S.cursor++;S.checked=[];partial=false;persist();render();
+   deduct(draw);S.cursor++;S.checked=[];partial=false;persist();render();logSound(S.cursor%N===0);
    TRADED=null;say('Logged what you ticked.',logLine('Logged what you ticked.'));
    fxSettle(settleInfo(draw,before,'In part: what you ticked'));},
  /* The last log is undoable until the next one. A deliberate undo is the one thing besides
@@ -589,6 +633,7 @@ window.act={
     wins the sync against the other device's copy. The server removes the log row, because
     the log is deduplicated by cursor and a re-log tonight would otherwise be dropped. */
  undoLog(){let L=S.last;
+   if(L&&L.cooked&&L.meal_id&&S.tally&&S.tally[L.meal_id]>0){S.tally[L.meal_id]--;if(!S.tally[L.meal_id])delete S.tally[L.meal_id];}
    if(L&&L.kind==='extra'){
      /* an extra put back: the stock it took, and its row on the Mac; the cursor never moved */
      S.inv=Object.assign({},L.inv);S.pending=Object.assign({},L.pending);S.gate0=Object.assign({},L.gate0);S.applied=L.applied.slice();S.order=L.order.slice();
@@ -619,7 +664,7 @@ window.act={
    navigator.clipboard?navigator.clipboard.writeText(m.join('\n')).then(()=>say(m.length+' items copied.'),()=>say('Copy blocked')):say('Copy blocked');},
  bump(k,d){ENTER='bump';FLIPSRC='bump';setInv(k,(S.inv[k]||0)+d);persist();render();},
  /* the store's list, bought: what was bought is added to what is on hand, never reset to a pack */
- restock(sk){FLIPSRC='stock';const st=STORES[sk],rows=listRows(sk);rows.forEach(r=>setInv(r.k,(S.inv[r.k]||0)+r.units));persist();render();
+ restock(sk){FLIPSRC='stock';ENTER='bump';const st=STORES[sk],rows=listRows(sk);rows.forEach(r=>setInv(r.k,(S.inv[r.k]||0)+r.units));persist();render();chime('buy');
    say(st.name+' run logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
  copy(sk){const st=STORES[sk],rows=listRows(sk);
    if(!rows.length){say('Nothing needed from '+st.name+'.');return;}
@@ -637,20 +682,23 @@ window.act={
    if(!rows.length){say('Nothing to buy at '+st.name+' for that many meals.');return;}
    const t=rows.map(r=>I[r.k].name+' — '+tripQty(r.units)+' '+I[r.k].unit+(r.packs>1?' ('+r.packs+' packs)':'')+' — needs '+tripQty(r.need)+', '+tripQty(r.have)+' on hand'+(I[r.k].buy?' — '+I[r.k].buy:'')).join('\n');
    navigator.clipboard?navigator.clipboard.writeText(t).then(()=>say('Copied the '+st.name+' trip.'),()=>say('Copy blocked')):say('Copy blocked');},
- tripBought(sk){FLIPSRC='stock';const st=STORES[sk],rows=tripNeed(sk,TRIP[sk]||st.threshold||14);
+ tripBought(sk){FLIPSRC='stock';ENTER='bump';const st=STORES[sk],rows=tripNeed(sk,TRIP[sk]||st.threshold||14);
    rows.forEach(r=>setInv(r.k,(S.inv[r.k]||0)+r.units));
-   delete TRIP[sk];persist();render();say(st.name+' trip logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
+   delete TRIP[sk];persist();render();chime('buy');say(st.name+' trip logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
  closeNote(){NOTE=null;render();},
  /* the guide: Skip puts the step it is showing behind you for good; the line finds the control */
- guideSkip(){const p=guidePlan(guideView());if(p&&p.key&&!S.seen.includes(p.key))S.seen.push(p.key);persist();guideSync();},
+ guideSkip(){if(GCLOSING){act.guideDone();return;}
+   const p=guidePlan(guideView());if(p&&p.key&&!S.seen.includes(p.key))S.seen.push(p.key);persist();guideSync();},
+ /* Done on the closing panel: the word was said; Show me around again brings it back */
+ guideDone(){if(!S.seen.includes('guide_close'))S.seen.push('guide_close');GLATER=[];persist();guideSync();},
  /* Show me around again: every step forgotten, the tour on, Tonight first. The guide was once
     shown once and never again; an app is not learnt in one pass. */
- guideAgain(){S.seen=S.seen.filter(k=>!GUIDE.some(s=>s.key===k));S.guide=true;S.tour=true;persist();tab='tonight';MKVIEW='overview';render();window.scrollTo({top:0});},
+ guideAgain(){S.seen=S.seen.filter(k=>!GUIDE.some(s=>s.key===k)&&k!=='guide_close');GLATER=[];S.guide=true;S.tour=true;persist();tab='tonight';MKVIEW='overview';render();window.scrollTo({top:0});},
  guideFind(){if(GTARGET&&GTARGET.scrollIntoView)GTARGET.scrollIntoView({block:'center',behavior:'smooth'});},
  notNow(){if(!S.seen.includes('report_nudge'))S.seen.push('report_nudge');persist();render();},
  closeFlip(){const g=document.getElementById('gate');g.innerHTML='';},
  reset(){S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:S.flav,init:false,pending:{},applied:[],
-   gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
+   gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true,tally:{}};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
 };
 
 /* What the log just did, said in the units the system owns: meals and cycles, never dates. */
@@ -792,7 +840,8 @@ function settleInfo(draw,before,how){
   const rows=Object.keys(draw||{}).filter(k=>draw[k]>0&&I[k]).map(k=>({name:I[k].name,used:q(draw[k]),before:q(before[k]),after:q(S.inv[k]),unit:I[k].unit,zone:I[k].zone,
     hot:hot.indexOf(k),share:draw[k]/Math.max(before[k]||0,draw[k])}));
   rows.sort((a,b)=>((a.hot<0)-(b.hot<0))||(a.hot>=0&&b.hot>=0?a.hot-b.hot:0)||(b.share-a.share));
-  return {cursor:S.cursor,meal:S.last?S.last.meal:mealAt(-1).name,how:how,rows:rows,next:mealAt(0).name,gate:gateLine()};
+  const mid=S.last&&S.last.meal_id, times=mid&&S.last.cooked?stampsOf(mid):0;
+  return {cursor:S.cursor,meal:S.last?S.last.meal:mealAt(-1).name,how:how,rows:rows,next:mealAt(0).name,gate:gateLine(),times:times,closes:S.cursor>0&&S.cursor%N===0};
 }
 /* a number that changed rolls to its new value: an odometer, every numeral a column that slides
    from the old digit to the new; a decimal point stays put */
@@ -836,7 +885,7 @@ function ledgerPlate(rows,release){
         p.vy+=0.34;p.y+=p.vy;p.vx+=(p.lx-p.x)*0.012;p.x+=p.vx;p.rot+=p.spin;
         if(p.y>=p.ly-6){
           if(!p.land){p.land=true;
-            if(!p.row.dataset.caught){p.row.dataset.caught='1';p.row.style.setProperty('--pc',p.el.style.getPropertyValue('--pc'));p.row.classList.add('catch');
+            if(!p.row.dataset.caught){p.row.dataset.caught='1';p.row.style.setProperty('--pc',p.el.style.getPropertyValue('--pc'));p.row.classList.add('catch');chime('catch');
               const b=vals[p.i]; if(b&&b.dataset.from!=null)roll(b,+b.dataset.from,+b.dataset.to,920);
               if(navigator.vibrate)try{navigator.vibrate(8);}catch(e){}}}
           p.a-=0.18;}
@@ -867,10 +916,11 @@ function fxSettle(info){
     const rows=info.rows.slice(0,5), more=info.rows.length-rows.length, q=v=>String(Math.round(v*10)/10);
     const release=560, rowAt=i=>300+i*70, landAt=i=>release+i*110+420, nextAt=landAt(Math.max(0,rows.length-1))+300;
     const m=S.last&&MEALS[S.last.meal_id]; L.dataset.family=m?famOf(m):'sprout';
-    L.innerHTML='<div class="lp-stage"><div class="lp"></div></div>'+
-      '<div class="ledger-eye lrise" style="animation-delay:120ms">Meal '+(info.cursor%N||N)+' · cycle '+(Math.floor((info.cursor-1)/N)+1)+' · logged</div>'+
+    const cyc=Math.floor((info.cursor-1)/N)+1;
+    L.innerHTML='<div class="lp-stage'+(info.closes?' cycle':'')+'"><div class="lp"></div>'+(info.closes?'<div class="lp-ring" id="lpring">'+ringSVG('lpr',0,0,176,4,'ring--lit')+'</div>':'')+'</div>'+
+      '<div class="ledger-eye lrise" id="leye" style="animation-delay:120ms">Meal '+(info.cursor%N||N)+' · cycle '+cyc+' · logged</div>'+
       '<div class="ledger-big lrise" style="animation-delay:160ms">'+esc(info.meal)+'</div>'+
-      '<div class="ledger-how lrise" style="animation-delay:200ms">'+esc(info.how)+'</div>'+
+      '<div class="ledger-how lrise" style="animation-delay:200ms">'+esc(info.how)+(info.times?' · '+stampWord(info.times):'')+'</div>'+
       '<div class="ledger-rows">'+rows.map((r,i)=>{const u=r.unit==='each'?'':esc(r.unit)+' ';return '<div class="ledger-row lrise" style="animation-delay:'+rowAt(i)+'ms"><span><span class="ledger-name">'+esc(r.name)+'</span>'+
         '<span class="ledger-meta">'+esc(q(r.used))+' '+u+'tonight</span></span>'+
         '<span class="ledger-val"><b class="odo" data-from="'+r.before+'" data-to="'+r.after+'">'+esc(q(r.before))+'</b><span class="u">'+u+'left</span></span></div>';}).join('')+
@@ -884,7 +934,15 @@ function fxSettle(info){
     rows.forEach((r,i)=>at(landAt(i)+380,()=>{const b=L.querySelectorAll('.ledger-row .odo')[i], row=L.querySelectorAll('.ledger-row')[i];
       if(b&&row&&!row.dataset.caught){row.dataset.caught='1';roll(b,r.before,r.after,920);}}));
     at(nextAt,()=>{const nx=document.getElementById('lnext');if(nx)nx.classList.add('wipe');});
-    at(info.hold?600000:Math.max(3800,nextAt+1500),ledgerHide);
+    /* the cycle closing: after the last piece lands, a ring draws shut around the plate, the
+       eyebrow says the cycle closed with its count of meals, and the figure plays */
+    if(info.closes)at(nextAt+420,()=>{const rg=document.getElementById('lpring'),eye=document.getElementById('leye'),lp=L.querySelector('.lp'),st=L.querySelector('.lp-stage');
+      if(rg&&lp&&st){const pr=lp.getBoundingClientRect(),sr=st.getBoundingClientRect();   /* centred on the plate as it lies, tilted */
+        rg.style.margin='0';rg.style.left=(pr.left+pr.width/2-sr.left-rg.offsetWidth/2)+'px';rg.style.top=(pr.top+pr.height/2-sr.top-rg.offsetHeight/2)+'px';}
+      if(rg){rg.classList.add('on');const a=rg.querySelector('.ring-a');if(a)a.style.strokeDashoffset='0';}
+      if(eye){eye.textContent='Cycle '+cyc+' closed · '+N+' meals logged';eye.classList.remove('lrise');void eye.offsetWidth;eye.style.animationDelay='0ms';eye.classList.add('lrise');}
+      chime('cycle');});
+    at(info.hold?600000:Math.max(3800,nextAt+1500)+(info.closes?2200:0),ledgerHide);
   }catch(e){}
 }
 
@@ -1090,6 +1148,16 @@ function readsCard(){
     (r.cost?'<span class="pill pill--ghost">'+esc(r.cost)+' cost</span>':'')+'</div>';});
   return h+'</div></section>';
 }
+/* nothing on file yet: the way in, in food words, and what one report can move. The overview
+   leads with it, and Full history shows it instead of a marker with "0 draws" over a paragraph
+   of research: a screen with nothing on record invites, it does not lecture. */
+function noReportCard(id){
+  return '<section class="card" data-family="plum" style="border-radius:var(--r-xl);box-shadow:var(--lift-2)" id="'+(id||'noreport')+'"><span class="t-label">No report yet</span>'+
+    '<p class="t-head" style="margin-top:var(--s3)">Add a lab report and dinner adjusts.</p>'+
+    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink-2)">One report from the last year is enough: several of the food rules fire on a single draw and move a night or two of the rotation. '+
+    'A second report, last year\'s say, lets the rules that wait to see a marker twice fire too. Any lab\'s PDF, or the numbers typed from paper. Nothing leaves this device.</p>'+
+    '<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="noreport" onclick="act.mk(\'reports\')">Add a report '+icon('arrow')+'</button></div></section>';
+}
 /* since your last draw: each marker that moved, the number then and now, and what dinner did
    about it in the rule's own words. The ones tied to dinner first, then by how far they moved. */
 function sinceCard(prim,by,s){
@@ -1126,14 +1194,7 @@ function viewOverview(){
 
   /* nothing on file yet: the overview leads with the way in, and says in food words what one
      report can move, and what a second one adds; the markers themselves sit one card down */
-  if(!prim.length){
-    top+='<section class="card" data-family="plum" style="border-radius:var(--r-xl);box-shadow:var(--lift-2)" id="noreport"><span class="t-label">No report yet</span>'+
-      '<p class="t-head" style="margin-top:var(--s3)">Add a lab report and dinner adjusts.</p>'+
-      '<p class="t-body" style="margin-top:var(--s2);color:var(--ink-2)">One report from the last year is enough: several of the food rules fire on a single draw and move a night or two of the rotation. '+
-      'A second report, last year\'s say, lets the rules that wait to see a marker twice fire too. Any lab\'s PDF, or the numbers typed from paper. Nothing leaves this device.</p>'+
-      '<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="noreport" onclick="act.mk(\'reports\')">Add a report '+icon('arrow')+'</button></div></section>';
-    top+=readsCard();
-  }
+  if(!prim.length)top+=noReportCard()+readsCard();
 
   if(hero){
     const hd=by[hero.marker];
@@ -1438,6 +1499,12 @@ function groupLine(g){
 const protWord=m=>PROTWORD[m.protein_class]||'';
 const ord=n=>n+(['th','st','nd','rd'][(n%100>10&&n%100<14)?0:(n%10<4?n%10:0)]);
 
+/* the passport: how many of the rotation's plates have been cooked at least once, and each
+   plate's stamp count on its row. A plate cooked is a fact in the log; nothing here is praise. */
+const stampsOf=id=>(S.tally&&S.tally[id])||0;
+function passportLine(){const ids=S.order.filter(id=>MEALS[id]),done=ids.filter(id=>stampsOf(id)>0).length;
+  return done?done+' of the '+ids.length+' plates cooked at least once.':'No plate cooked yet; each one is stamped the night it is.';}
+const stampWord=n=>n===1?'cooked once':'cooked '+n+' times';
 /* seven meals around tonight: the ones already logged sit behind, the current one is the deep fill */
 function strip(){
   const cur=S.cursor+1, w0=Math.max(1,cur-3);
@@ -1454,7 +1521,8 @@ function rotRow(F,i){
   const changed=was&&was.id!==x.id, sw=changed?SWAPS.find(s=>s.from===was.id&&s.to===x.id):null;
   const pend=changed?[]:SWAPS.filter(s=>s.from===x.id&&S.pending[s.key]>0);
   const open=OPEN==='r'+i, ct=coldTot(i,ROT), n=S.cursor+1+i;
-  const meta='Meal '+n+(protWord(x)?' · '+esc(protWord(x)):'')+' · '+(x.equipment?esc(x.mode||'')+(x.temp_f!=null?' '+x.temp_f+'°':'')+' · '+timeParts(x.minutes).join(' '):'not for this kitchen');
+  const st=stampsOf(x.id);
+  const meta='Meal '+n+(protWord(x)?' · '+esc(protWord(x)):'')+' · '+(x.equipment?esc(x.mode||'')+(x.temp_f!=null?' '+x.temp_f+'°':'')+' · '+timeParts(x.minutes).join(' '):'not for this kitchen')+(st?' · '+stampWord(st):'');
   let note='';
   if(changed)note='Was '+was.name+'. The '+((sw&&(sw.gate_name||sw.gate_item))||'stock')+' runs out before this, so your labs take the slot.';
   else if(pend.length)note='Becomes '+pend[0].to_name+' once the '+(pend[0].gate_name||pend[0].gate_item)+' is gone.';
@@ -1469,7 +1537,7 @@ function rotRow(F,i){
   const uses=Object.entries(x.uses||{}).map(([k,v])=>v+' '+(I[k]?I[k].unit+' '+I[k].name.toLowerCase():k)).join(', ');
   return '<div class="exp'+(open?' open':'')+'">'+
     '<button class="row" type="button" data-fk="rot:'+i+'" onclick="act.open(\'r'+i+'\')" aria-expanded="'+open+'">'+
-      '<span class="row__thumb" data-family="'+famOf(x)+'"><span class="motif"></span></span>'+
+      '<span class="row__thumb" data-family="'+famOf(x)+'"><span class="motif"></span>'+(st?'<span class="stampn" aria-hidden="true">'+st+'</span>':'')+'</span>'+
       '<span class="row__body"><span class="row__title">'+esc(x.name)+'</span><span class="row__meta">'+meta+'</span>'+
       (note?'<span class="row__note">'+esc(note)+'</span>':'')+'</span>'+pill+'<span class="chev"></span></button>'+
     '<div class="exp-b"><div><div class="rot__in">'+
@@ -1529,7 +1597,8 @@ function viewRotation(F){
   h+='<section class="card card--lit a-hero" data-family="sprout" style="border-radius:var(--r-xl)" aria-label="Where you are in the rotation">'+
     '<div class="split"><div><span class="t-label">Tonight is meal</span>'+
       '<div class="numrow" style="margin-top:var(--s3)"><b class="num num--xl">'+cur+'</b><span class="t-unit" style="font-size:15px">in cycle '+cyc+'</span></div>'+
-      '<p class="t-note" style="margin-top:var(--s2)">The '+ord(pos+1)+' of '+N+' in this cycle'+(after?' · '+after+' more after tonight':' · the last one, then a new cycle')+'</p></div>'+
+      '<p class="t-note" style="margin-top:var(--s2)">The '+ord(pos+1)+' of '+N+' in this cycle'+(after?' · '+after+' more after tonight':' · the last one, then a new cycle')+'</p>'+
+      '<p class="t-note" style="margin-top:var(--s1)">'+passportLine()+'</p></div>'+
     '<span class="chip chip--lg chip--onlit chip--round">'+gl('rotation')+'</span></div>'+
     '<span class="t-label" style="display:block;margin-top:var(--s5)">The rotation from here</span>'+
     '<div style="margin-top:var(--s3)">'+strip()+'</div></section>';
@@ -1572,12 +1641,16 @@ function viewKitchen(F){
   /* the lit card: how far the stock reaches, and the bars by zone against the list line */
   /* the chart's top is the tallest thing on it, the list line included, with a little air */
   const thr=(cs&&cs.threshold)||0, scale=Math.max.apply(null,[thr,1].concat(zs.map(z=>Math.min(zm[z],H))))*1.2;
+
+  /* the cover as a gauge: full at twice the list line, so a fresh shop reads as half a ring
+     with room to keep it high, and a run due reads as the arc closing on the list line */
+  const gfull=Math.max(2*thr,28), gto=Math.min(1,Math.min(run.d,H)/gfull), gfrom=(ENTER==='bump'&&PAINTED&&PAINTED.run!=null)?Math.min(1,Math.min(PAINTED.run,H)/gfull):null;
   let hero='<section class="card card--lit" data-family="frost" style="border-radius:var(--r-xl)" aria-label="How far the stock reaches">'+
     '<div class="split"><div><span class="t-label">Covered without shopping</span>'+
-    '<div class="numrow" style="margin-top:var(--s3)"><b class="num num--xl">'+(run.d>=H?H+'+':run.d)+'</b><span class="t-unit" style="font-size:15px">meals</span></div>'+
+    '<div class="numrow" style="margin-top:var(--s3)"><b class="num num--xl">'+(run.d>=H?H+'+':'<span id="krun">'+run.d+'</span>')+'</b><span class="t-unit" style="font-size:15px">meals</span></div>'+
     '<p class="t-note" style="margin-top:var(--s2)">'+(run.k?esc(I[run.k].name)+(L[run.k]<=0?' is out.':' runs out first.'):'Nothing the rotation uses runs short inside '+H+' meals.')+
       (PORTIONS>1?' Stocked for '+esc(peopleWord(PORTIONS))+' a meal.':'')+'</p></div>'+
-    '<span class="chip chip--lg chip--onlit chip--round">'+icon('frost')+'</span></div>'+
+    '<span class="gauge" aria-label="'+(run.d>=H?H+' or more':run.d)+' meals covered, the list starts at '+thr+'">'+ringSVG('kring',gfrom,gto,64,6,'ring--onlit')+'<span class="gauge-in">'+icon('frost')+'</span></span></div>'+
     '<span class="t-label" style="display:block;margin-top:var(--s5)">Meals by zone</span>'+
     '<div class="bars'+(ENTER==='bump'?' fill':'')+'" style="margin-top:var(--s3)">';
   zs.forEach(z=>{const v=Math.min(zm[z],H), pct=Math.max(3,Math.round(Math.min(100,v/scale*100)));
@@ -1893,6 +1966,9 @@ function chips(){
 /* ---- FULL HISTORY: one marker, the chart, every draw, and what you ate before each ------ */
 function viewTrend(){
   const s=MK&&MK!=='none'?MK.s:null;
+  /* no draw on record: the invitation, never a marker picked at random with "0 draws" over its
+     research notes (what a fresh home showed: Apolipoprotein B, and a paragraph of reference) */
+  if(!s||!(s.draws&&s.draws.length))return '<div class="stack">'+noReportCard('noreport-trend')+readsCard()+'</div>';
   let top='<section class="card" data-family="plum">';
   if(s){
     top+='<div class="field"><span>Marker</span><select data-fk="trendsel" onchange="act.trend(this.value)">'+
@@ -1912,7 +1988,11 @@ function viewTrend(){
   if(t.target)top+=tline(t.target,t.target.lens===t.lens?'Target, '+t.lens+' view':'Target, no '+t.lens+' row so '+t.target.lens+' used');
   else top+='<p class="t-note" style="margin-top:var(--s3)">No researched target for this marker; judged against the lab’s printed range.</p>';
   if(t.alt_target&&(!t.target||t.alt_target.text!==t.target.text))top+=tline(t.alt_target,'Also, '+t.alt_lens+' view');
-  if(t.target&&t.target.notes)top+='<p class="t-note" style="margin-top:var(--s2)">'+esc(t.target.notes)+'</p>';
+  /* the research behind the target sits behind one tap, never as the first thing on a screen */
+  if(t.target&&t.target.notes)top+='<div class="exp'+(OPEN==='tnotes'?' open':'')+'" style="margin-top:var(--s3)">'+
+    '<button class="row" type="button" data-fk="tnotes" onclick="act.open(\'tnotes\')" aria-expanded="'+(OPEN==='tnotes')+'">'+
+      '<span class="row__body"><span class="row__title">Why this target</span><span class="row__meta">the research behind the line, in its own words</span></span><span class="chev"></span></button>'+
+    '<div class="exp-b"><div><p class="t-note" style="padding:0 0 var(--s3)">'+esc(t.target.notes)+'</p></div></div></div>';
   top+='</section>';
   let main='<section class="card"><div class="split"><span class="t-label">Every draw</span><span class="mono" style="color:var(--ink-3)">as the lab printed it</span></div>'+
     '<div class="scroll-x" style="margin-top:var(--s2)"><table class="data"><thead><tr><th class="n">Date</th><th class="n">Value</th><th>Lab range</th><th>Lab flag</th><th>vs target</th><th>Printed as</th></tr></thead><tbody>';
@@ -2599,15 +2679,30 @@ function viewProfile(){
       '<p class="t-note" style="margin-top:var(--s4)">Or take everything with you: a backup is one file with every report, result, row and log, and Plateside on any other device restores from it.</p>'+
       '<div class="btnrow" style="margin-top:var(--s2)"><button class="btn" type="button" data-fk="bkup" onclick="act.backup()">Back up</button></div></section>';
   }
+  const tier=tiers.includes(pr.risk_tier)?pr.risk_tier:'intermediate';
   let lens='<section class="card" id="lens" data-family="plum"><span class="t-label">Lens and risk tier</span><div class="formgrid" style="margin-top:var(--s3)">'+
     '<div class="field"><span>Which targets judge you</span><select id="lensSel" data-fk="lens">'+
       '<option value=""'+(!pr.guideline_lens?' selected':'')+'>Not chosen: conventional</option>'+
       '<option value="conventional"'+(pr.guideline_lens==='conventional'?' selected':'')+'>Conventional guidelines</option>'+
       '<option value="functional"'+(pr.guideline_lens==='functional'?' selected':'')+'>Functional, optimal ranges</option></select></div>'+
-    '<div class="field"><span>Risk tier</span><select id="tierSel" data-fk="tier">'+tiers.map(t=>'<option'+(t===pr.risk_tier?' selected':'')+'>'+t+'</option>').join('')+'</select></div>'+
+    '<div class="field"><span>Risk tier</span><select id="tierSel" data-fk="tier" onchange="act.tierWord(this.value)">'+tiers.map(t=>'<option value="'+t+'"'+(t===tier?' selected':'')+'>'+TIERWORD[t]+'</option>').join('')+'</select></div>'+
+    /* the band the chosen tier means, in one line that follows the select before Save */
+    '<p class="t-note wide" id="tierline" style="margin:0">'+esc(tierLine(tier))+'</p>'+
     '<div class="field"><span>Routine draw cadence, months</span><input type="number" id="cadIn" data-fk="cad" value="'+esc(pr.draw_cadence_months||'')+'" min="1" max="60"></div>'+
     '<div class="field"><span>&nbsp;</span><button class="btn btn--ink" type="button" data-fk="profsave" onclick="act.saveProfile()">Save</button></div></div>'+
-    '<p class="t-note" style="margin-top:var(--s3)">The lens decides which set of targets judges your values and drives the plan; both are always shown. The tier sets your LDL, non-HDL and ApoB targets. Decide it with your cardiologist or the PREVENT calculator.'+(LOCAL?'':' Files live in '+esc(h0.config_dir)+'.')+'</p>';
+    '<p class="t-note" style="margin-top:var(--s3)">The lens decides which set of targets judges your numbers; the tier sets three cholesterol targets and nothing else. Neither changes dinner on its own.'+(LOCAL?'':' Files live in '+esc(h0.config_dir)+'.')+'</p>'+
+    /* how anyone would know theirs, and what each setting changes: five short facts, one tap away */
+    '<div class="exp'+(OPEN==='lenshow'?' open':'')+'" style="margin-top:var(--s3)">'+
+      '<button class="row" type="button" data-fk="lenshow" onclick="act.open(\'lenshow\')" aria-expanded="'+(OPEN==='lenshow')+'">'+
+        '<span class="row__body"><span class="row__title">Your tier and lens, explained</span><span class="row__meta">how to know yours, and what each one changes</span></span><span class="chev"></span></button>'+
+      '<div class="exp-b"><div><dl class="facts" style="margin-top:var(--s1);padding-bottom:var(--s3)">'+
+        '<dt>The tier</dt><dd>The band your ten-year heart risk falls in, as the PREVENT calculator or your clinician puts it. '+tiers.map(t=>'<b>'+TIERWORD[t]+'</b>: '+TIERBAND[t]+'.').join(' ')+'</dd>'+
+        '<dt>Knowing yours</dt><dd>Plateside cannot compute it: PREVENT needs your blood pressure and whether you smoke, have diabetes or take a statin or a blood-pressure pill, none of which the app asks. Your clinician can, in a minute, from the same blood work; so can the calculator at professional.heart.org. Until then the guideline default, intermediate, stands.</dd>'+
+        '<dt>What it changes</dt><dd>Three targets: LDL, non-HDL and ApoB. A higher tier asks for lower lines. Nothing else in the app reads it.</dd>'+
+        '<dt>The lens</dt><dd>Conventional judges every number against the major guidelines\' targets; functional against the tighter optimal ranges from functional and longevity medicine. Both are always shown on every marker. The lens picks which one counts as outside target, and outside target is what the food rules read, so a stricter lens can move more nights of the rotation.</dd>'+
+        '<dt>Your history</dt><dd>A fact added below changes two things today: the draw plan, so what to test next and how soon, and the panels it sits beside. It never changes dinner. Only the tier and the lens change which targets judge you.</dd>'+
+        '<dt>Why it matters</dt><dd>These two settings decide what outside target means for you, and that is the one thing the food rules read. Set them once, with your clinician if you can. The wrong tier judges your cholesterol against the wrong line.</dd>'+
+      '</dl></div></div></div>';
   lens+='</section>';
   let top=viewTargetCard(pr);
   let main=viewRegimen();
@@ -2669,16 +2764,18 @@ const GUIDE=[
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Your lab reports live under Markers.'},
     {when:v=>v.mk!=='reports',sel:'[data-fk="mkadd"]',line:'Tap Add a report.'},
     {when:v=>true,sel:'[data-fk="uplbtn"],[data-fk="typebtn"]',line:'Pick your lab\'s PDF, or type the numbers from paper. No report yet? Skip this for now.'}]},
-  {key:'guide_weigh',due:v=>v.draws>0&&v.weighed!==true,done:v=>v.weighed===true,hops:[
+  {key:'guide_weigh',due:v=>v.draws>0&&v.weighed!==true,done:v=>v.weighed===true,later:'Once a report is on file, weigh in and the plate corrects itself.',hops:[
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Weigh in under Markers. After three weigh-ins the plate corrects itself.'},
     {when:v=>v.mk!=='body',sel:'[data-fk="mkv:body"]',line:'Body holds the scale.'},
     {when:v=>true,sel:'[data-fk="weigh"]',line:'Type your weight and tap Log a weigh-in. After three, the plate corrects itself.'}]},
-  {key:'guide_moved',due:v=>v.draws>=2&&v.moved!==false,done:v=>false,arrive:true,hops:[
+  {key:'guide_moved',due:v=>v.draws>=2&&v.moved!==false,done:v=>false,arrive:true,can:v=>v.draws>=2,later:'After a second draw, Markers says what moved.',hops:[
     {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'A second draw is on file. Markers says what moved.'},
     {when:v=>v.mk!=='overview',sel:'[data-fk="mkv:overview"]',line:'All markers shows what moved since your last draw.'},
     {when:v=>true,sel:'#since',line:'What moved between the two draws, and what dinner did about it.'}]}
 ];
-/* the first step not yet seen: {done:key} when the state already did it, else the hop to light */
+/* the first step not yet seen: {done:key} when the state already did it, else the hop to light;
+   {done:key, later:line} when a tour reaches a step whose screen cannot exist yet, so the
+   closing panel can say when it will */
 function guidePlan(v){
   if(!v||!v.on)return null;
   for(const s of GUIDE){
@@ -2687,14 +2784,14 @@ function guidePlan(v){
     if(!v.tour){
       if(s.done(v))return {done:s.key};
       if(!s.due(v))continue;
-    }
+    } else if(s.can&&!s.can(v))return {done:s.key,later:s.later};
     const i=s.hops.findIndex(h=>h.when(v)), h=s.hops[i];
     return {key:s.key,sel:h.sel,line:h.line,last:i===s.hops.length-1,arrive:!!s.arrive,n:GUIDE.indexOf(s),of:GUIDE.length};
   }
   return null;
 }
 /* GUIDE-END */
-let GTARGET=null, GKEY=null, GRAF=null, GPLAN=null, GFORCE=false;
+let GTARGET=null, GKEY=null, GRAF=null, GPLAN=null, GFORCE=false, GSHOWN=false, GCLOSING=false, GLATER=[];
 function guideView(){
   const live=liveItems();
   return {on:!!S.guide,tour:!!S.tour,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,
@@ -2707,18 +2804,28 @@ function guideView(){
 function guideSync(){
   const g=document.getElementById('guide'); if(!g)return;
   if(!S.init||!S.guide){g.hidden=true;GTARGET=null;GKEY=null;return;}
+  let advanced=false;
   for(let guard=0;guard<8;guard++){
     const p=guidePlan(guideView());
-    if(!p){if(S.tour){S.tour=false;persist();}break;}                      /* a tour ends when nothing is left to show */
-    if(p.done){S.seen.push(p.done);persist();continue;}
+    if(!p){
+      if(S.tour){S.tour=false;persist();}                                  /* a tour ends when nothing is left to show */
+      /* ...and it ends with a word, once: the loop is done, or done for now, and where to find
+         this again. Only when a step was just put behind or was lit this session, so a quiet
+         boot with nothing due never pops it. The steps a screen cannot show yet say when. */
+      if(S.guide&&!S.seen.includes('guide_close')&&(advanced||GSHOWN)){
+        const laters=[...new Set(GLATER.concat(GUIDE.filter(s=>s.later&&!S.seen.includes(s.key)).map(s=>s.later)))];
+        guideClose(g,laters);return;}
+      break;}
+    if(p.done){S.seen.push(p.done);if(p.later)GLATER.push(p.later);persist();advanced=true;continue;}
     const el=document.querySelector(p.sel);
     /* nothing to light here: a step whose control is gone is behind you, unless the screen is
        still loading, when the control is only not here yet (Markers paints "Loading…" first) */
     if(!el){const loading=[...document.querySelectorAll('#app .t-body')].some(x=>x.textContent==='Loading…');
-      if(p.last&&!loading){S.seen.push(p.key);persist();continue;}break;}
+      if(p.last&&!loading){S.seen.push(p.key);persist();advanced=true;continue;}break;}
     if(p.last&&p.arrive&&!S.seen.includes(p.key)){S.seen.push(p.key);persist();}   /* shown once: the light stays for this render */
     const moved=GFORCE||(GKEY!==null&&GKEY!==p.key+p.sel), wasHidden=g.hidden;
-    GFORCE=false;GTARGET=el;GKEY=p.key+p.sel;GPLAN=p;
+    GFORCE=false;GTARGET=el;GKEY=p.key+p.sel;GPLAN=p;GSHOWN=true;
+    if(GCLOSING){GCLOSING=false;g.classList.remove('closing');document.querySelector('.g-skip').textContent='Skip';}
     const line=document.getElementById('gline');
     if(line.textContent!==p.line){line.textContent=p.line;line.classList.remove('swap');void line.offsetWidth;line.classList.add('swap');}
     document.getElementById('gsteps').innerHTML=GUIDE.map((s,i)=>'<i class="'+(i<p.n?'done':i===p.n?'now':'')+'"></i>').join('');
@@ -2732,6 +2839,18 @@ function guideSync(){
     return;
   }
   g.hidden=true;GTARGET=null;GKEY=null;GPLAN=null;
+}
+/* the closing panel: no hole and no dim, the step bar full, one line, and Done where Skip was */
+function guideClose(g,laters){
+  GCLOSING=true;GTARGET=null;GKEY='close';GPLAN=null;
+  const txt='That is the loop.'+(laters.length?' '+laters.join(' '):'')+' Find it again under You, The guide.';
+  const line=document.getElementById('gline');
+  if(line.textContent!==txt){line.textContent=txt;line.classList.remove('swap');void line.offsetWidth;line.classList.add('swap');}
+  document.getElementById('gsteps').innerHTML=GUIDE.map(()=>'<i class="done"></i>').join('');
+  document.querySelector('.g-skip').textContent='Done';
+  const path=document.getElementById('gpath'), dot=document.getElementById('gdot');
+  if(path)path.setAttribute('d','');if(dot)dot.setAttribute('r','0');
+  g.classList.add('closing');g.hidden=false;
 }
 /* the light lands again after something else moved the page (the log moment scrolls to the top) */
 function guideRefresh(){GKEY=null;GFORCE=true;guideSync();}
@@ -2765,6 +2884,18 @@ document.addEventListener('click',e=>{
   if(e.target.closest(p.sel)&&!S.seen.includes(p.key)){S.seen.push(p.key);persist();}
 },true);
 
+/* the risk tier's five bands, the guideline's own words said plainly: the tier is a setting the
+   app asks for, so the card says what each band means and who can tell a person theirs. Never
+   a verdict on the person: the band is the calculator's, the number is the lab's. */
+const TIERWORD={low:'Low',borderline:'Borderline',intermediate:'Intermediate',high:'High',very_high:'Very high'};
+const TIERBAND={low:'a ten-year risk under 3 percent',borderline:'3 to 5 percent',intermediate:'5 to 10 percent, and the guideline default when nobody has computed it',
+  high:'10 percent or more, a calcium score of 100 or more, a family cholesterol disorder, or diabetes with other risk factors',very_high:'a heart attack, stroke, stent or bypass already on record'};
+const tierLine=t=>TIERWORD[t]+': '+TIERBAND[t]+'.';
+/* the shipped files, in the words a person would use, for the one line that says a build refreshed them */
+const SEEDWORD={stores:'the stores',store_items:'what the stores carry',equipment:'the kitchens',cooking:'the cooking times',meals:'the meals',kits:'the flavour kits',
+  cold_slots:'the cold options',items:'the items',regimens:'the plans',occasions:'the occasions',rotations:'the rotations',diet:'the plan defaults',diet_rules:'the food rules',
+  flavor_pantry:'the flavour pantry',targets:'the researched targets',targets_functional:'the functional targets',target_tiers:'the tier targets',policy:'the draw policy',
+  explain:'the explanations',markers:'the marker list',aliases:'the lab names',derived:'the calculated markers',exposure:'the exposure windows',ignore:'the ignore list'};
 /* Appearance, under You. The app follows the phone's own setting unless a choice is made here,
    and the control that owns that stored choice is never removed, only moved: it stood in the
    masthead as a toggle until Phase 8. Light is the identity the design is drawn for; a phone set
@@ -2774,14 +2905,24 @@ function viewAppearance(){
   const opt=(v,l,ic)=>'<button type="button" role="radio" data-fk="theme:'+v+'" aria-checked="'+(c===v)+'" onclick="act.theme(\''+v+'\')">'+(ic?icon(ic):'')+l+'</button>';
   return '<section class="card" id="appearance"><div class="split"><span class="t-label">Appearance</span><span class="mono" style="color:var(--ink-3)">this device</span></div>'+
     '<div class="seg" role="radiogroup" aria-label="Appearance" style="margin-top:var(--s3)">'+opt('auto','Match my phone','')+opt('light','Light','sun')+opt('dark','Dark','moon')+'</div>'+
-    '<p class="t-note" style="margin-top:var(--s3)">Matches your phone\'s own light or dark setting unless you choose one here. The choice stays on this device.</p></section>';
+    '<p class="t-note" style="margin-top:var(--s3)">Matches your phone\'s own light or dark setting unless you choose one here. The choice stays on this device.</p>'+
+    '<span class="t-label" style="display:block;margin-top:var(--s4)">Sound</span>'+
+    '<div class="seg" role="radiogroup" aria-label="Sound" style="margin-top:var(--s2)">'+
+      '<button type="button" role="radio" data-fk="sound:on" aria-checked="'+soundOn()+'" onclick="act.sound(true)">On</button>'+
+      '<button type="button" role="radio" data-fk="sound:off" aria-checked="'+(!soundOn())+'" onclick="act.sound(false)">Off</button></div>'+
+    '<p class="t-note" style="margin-top:var(--s3)">A chime when a meal is logged, a longer one when a cycle closes, two notes when a shop lands in stock. Nothing else makes a sound.</p></section>';
 }
 /* One masthead on every screen: the brand, the meal and cycle count once the app is set up,
    and one round control, You. The theme choice lives under You (viewAppearance), so the
    control that owns the stored choice is never removed, only moved. */
 function mastHTML(full){
+  /* the cycle ring: one arc that fills a meal at a time and, on the log that closes a cycle,
+     fills shut before the next render empties it for the new one */
+  const frac=(S.cursor%N)/N, to=(frac===0&&ENTER==='log'&&RINGF!=null&&RINGF>0)?1:frac;
+  const ring=full?ringSVG('cring',RINGF,to,18,3,'ring--cycle'):'';
+  if(full)RINGF=to;
   return '<div class="mast-r"><span class="brand">PLATESIDE</span>'+
-    (full?'<span class="folio">MEAL '+(S.cursor+1)+' · CYCLE '+(Math.floor(S.cursor/N)+1)+'</span>':'<span></span>')+
+    (full?'<span class="folio">'+ring+'MEAL '+(S.cursor+1)+' · CYCLE '+(Math.floor(S.cursor/N)+1)+'</span>':'<span></span>')+
     '<span class="mast-ctl">'+
     (full?'<button class="tog" type="button" data-fk="you" onclick="act.you()" aria-label="You: your target, how you eat, your kitchen, your stores and your data"'+(tab==='you'?' aria-current="true"':'')+'>'+icon('you')+'</button>':'')+
     '</span></div>';
@@ -2826,6 +2967,10 @@ function render(){
   if(SCROLLTO&&!Object.keys(LOADING).some(k=>LOADING[k])){const el=document.getElementById(SCROLLTO);if(el){SCROLLTO=null;el.scrollIntoView({block:'start'});window.scrollBy(0,-90);}}
 
   if(tab==='markers'&&MKVIEW==='trend')wireChart(document.getElementById('app'));
+  fillRings();
+  /* a shop landed: the cover rolls to its new count as an odometer (a count past the horizon is a word, and stays) */
+  if(tab==='kitchen'&&ENTER==='bump'&&PAINTED&&PAINTED.run!=null){const el=document.getElementById('krun'),now=runIn(F).d;
+    if(el&&PAINTED.run!==now&&now<H&&PAINTED.run<H)roll(el,PAINTED.run,now,900);}
   document.body.dataset.tenure=S.cursor<N?'new':S.cursor<3*N?'learning':'settled';
   PAINTED={cursor:S.cursor,pending:Object.assign({},S.pending),L:Object.assign({},F.L),run:runIn(F).d};
   ENTER=null;JUST=null;
@@ -2861,6 +3006,7 @@ function loadState(v){
     order:normOrder(s.order),off:s.off||{},flav:s.flav||[],init:s.init||false,
     pending:(s.pending&&typeof s.pending==='object')?s.pending:{},applied:Array.isArray(s.applied)?s.applied:[],
     gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],guide:!!s.guide,tour:!!s.tour,
+    tally:(s.tally&&typeof s.tally==='object')?s.tally:null,
     reset_at:s.reset_at||0,setup:!!s.setup||!!s.init,last:(s.last&&typeof s.last==='object'&&Array.isArray(s.last.order))?s.last:null};return true;}catch(e){return false;}
 }
 /* The other device logged a meal or changed stock: take its copy and redraw. */
@@ -2882,7 +3028,17 @@ document.addEventListener('lt:remote',e=>{
   let back=null;try{back=JSON.parse(sessionStorage.getItem('lt:return')||'null');sessionStorage.removeItem('lt:return');}catch(e){}
   if(back&&S.init){tab=back.tab||tab;MKVIEW=back.mk||MKVIEW;if(back.item&&I[back.item])SED.item=back.item;if(back.store&&STORES[back.store])SED.store=back.store;}
   render();
+  /* a home that logged meals before the passport existed reads its stamps from the meal log:
+     once when the state has no passport, and again while it is empty with meals logged, so a
+     read that failed (no signal, the Mac asleep) is not the passport's last word */
+  if(S.init&&(S.tally===null||(S.cursor>0&&!Object.keys(S.tally||{}).length))){
+    if(S.tally===null)S.tally={};
+    api('/api/plate/tally').then(t=>{const got=(t&&t.tally&&typeof t.tally==='object')?t.tally:{};
+      if(Object.keys(got).length){S.tally=got;persist();render();}}).catch(e=>{console.warn('passport: '+(e&&e.message||e));});}
   /* the Profile view draws once its data arrives, so the render that draws the editor scrolls */
   if(back&&S.init){SCROLLTO=back.at||null;if((tab==='markers'||tab==='you')&&MK===null)loadMarkers();}
+  /* the device caught a seeded file up with this build: say which, in food words, once */
+  const L0=window.PLATE_LOCAL;
+  if(L0&&Array.isArray(L0.refreshed)&&L0.refreshed.length&&S.init)say('This build refreshed '+list([...new Set(L0.refreshed.map(n=>SEEDWORD[n]||n))])+'.');
 })();
 

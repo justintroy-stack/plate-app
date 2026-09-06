@@ -13,6 +13,11 @@
 <meta name="description" content="Plateside takes the guesswork out of what to cook, what to buy and when, sized to your weight goal and shaped by your blood work.">
 <meta property="og:title" content="Plateside">
 <meta property="og:description" content="Plateside takes the guesswork out of what to cook, what to buy and when, sized to your weight goal and shaped by your blood work.">
+<meta property="og:image" content="https://justintroy-stack.github.io/plate-app/share.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Plateside: what to cook, what to buy and when, sized to your weight goal and shaped by your blood work.">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="preload" href="fonts/plate-sans.woff2" as="font" type="font/woff2" crossorigin>
@@ -361,6 +366,25 @@ button.card{width:100%;text-align:left}
     radial-gradient(circle at 88% 14%, transparent 0 38%, rgba(255,255,255,.16) 38.5% 40%, transparent 40.5%)}
 .hero-in{position:relative;z-index:2}
 
+/* RING — one drawing for every arc: the cycle in the masthead, the cover on Kitchen, the cycle
+   closing on the sheet. The arc is a dashed circle whose offset is the part still open; it
+   moves only when the value did (fillRings), the Fill motion. */
+.ring{transform:rotate(-90deg);flex:none;display:block}
+.ring circle{fill:none;stroke-linecap:round}
+.ring .ring-t{stroke:var(--sunk)}
+.ring .ring-a{stroke:var(--sprout);transition:stroke-dashoffset var(--d-hero) var(--ez-out)}
+.ring--onlit .ring-t{stroke:rgba(255,255,255,.45)}
+.ring--onlit .ring-a{stroke:var(--deep,var(--frost-deep))}
+.folio .ring--cycle{margin-right:3px}
+.folio .ring--cycle .ring-a{stroke:var(--sprout-deep)}
+/* the cover gauge: the ring where the chip stood, the family glyph at its centre */
+.gauge{position:relative;width:64px;height:64px;flex:none;display:grid;place-items:center}
+.gauge .ring{position:absolute;inset:0}
+.gauge-in{width:38px;height:38px;border-radius:var(--r-pill);background:rgba(255,255,255,.42);color:var(--on-lit);display:grid;place-items:center}
+.gauge-in svg{width:18px;height:18px;stroke:currentColor;stroke-width:1.7;fill:none;stroke-linecap:round;stroke-linejoin:round}
+/* the passport stamp on a rotation row: how many nights the plate was cooked */
+.stampn{position:absolute;right:-3px;bottom:-3px;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--ink);color:var(--enamel);
+  font-family:var(--mono);font-size:10px;font-weight:600;line-height:18px;text-align:center;box-shadow:0 0 0 2px var(--surface)}
 /* the masthead's two words: the brand, and the meal and cycle count */
 .brand{font-family:var(--sans);font-weight:800;letter-spacing:.2em;font-size:11.5px;color:var(--ink)}
 .folio{color:var(--ink-3);display:flex;align-items:center;gap:5px}
@@ -660,8 +684,23 @@ table.data td.wrap{white-space:normal;min-width:180px}
 }
 
 /* Leave out: one tick per food group, in a pill, wrapping */
-.ticks{display:flex;flex-wrap:wrap;gap:var(--s2);margin-top:var(--s2)}
-.tick-pill{display:inline-flex;align-items:center;gap:8px;padding:4px 12px 4px 4px;border-radius:var(--r-pill);background:var(--sunk);color:var(--ink);cursor:pointer;font-size:14px}
+.ticks{display:flex;flex-wrap:wrap;gap:6px;margin-top:var(--s2)}
+/* a Leave out chip: 32 px tall with 13 px type, the chip itself the control, so the fourteen
+   fit three rows in a 303 px card at phone width (they stood 40 px with a box inside and took
+   four or five); it fills ink when it is on, with a drawn check before the word. The tap target
+   stays 44 px by an invisible inset around each chip, not by air between them. */
+.tick-pill{position:relative;display:inline-flex;align-items:center;height:32px;padding:0 11px;border-radius:var(--r-pill);
+  background:var(--sunk);color:var(--ink);cursor:pointer;font-size:13px;font-weight:520;line-height:1;-webkit-tap-highlight-color:transparent;
+  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
+.tick-pill::before{content:"";position:absolute;left:-2px;right:-2px;top:-6px;bottom:-6px}
+.tick-pill .tick{position:absolute;opacity:0;width:1px;height:1px;left:0;top:0;pointer-events:none}
+.tick-pill:has(.tick:checked){background:var(--ink);color:var(--enamel)}
+.tick-pill:has(.tick:checked) span::before{content:"";display:inline-block;width:5px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(42deg);margin:0 8px 2px 1px}
+/* a browser without :has keeps the box, so the state is never invisible */
+@supports not selector(:has(a)){
+  .tick-pill{padding-left:5px;gap:7px}
+  .tick-pill .tick{position:static;opacity:1;width:22px;height:22px;border-radius:7px;pointer-events:auto}
+  .tick-pill .tick:checked::after{left:7.5px;top:3px;width:5px;height:10px}}
 </style>
 
 <style>
@@ -702,6 +741,12 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   transform:rotateX(0deg);transform-origin:50% 100%;will-change:transform}
 #ledger.on .lp{animation:lptilt .82s var(--ez-spring) .5s both}
 @keyframes lptilt{to{transform:rotateX(64deg)}}
+/* the cycle closing: a ring around the plate that draws shut after the last piece lands */
+.lp-stage.cycle{height:214px}
+.lp-ring{position:absolute;left:50%;top:50%;width:176px;height:176px;margin:-88px 0 0 -88px;opacity:0;transition:opacity .3s var(--ez);pointer-events:none}
+.lp-ring.on{opacity:1}
+.lp-ring .ring-t{stroke:rgba(255,255,255,.14)}
+.lp-ring .ring-a{stroke:var(--lit,#B6E44F);transition:stroke-dashoffset 1.15s var(--ez-out)}
 .lpc{position:absolute;left:0;top:0;width:11px;height:11px;border-radius:3.5px;background:var(--pc,#fff);box-shadow:0 1px 3px rgba(0,0,0,.4);
   will-change:transform,opacity;pointer-events:none}
 .lpc.round{border-radius:50%}
@@ -749,6 +794,7 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
 .g-ring{position:absolute;inset:-7px;border-radius:calc(var(--r-lg) + 7px);border:2px solid var(--sprout-lit,#D6E8A0);opacity:0;
   animation:gbreathe 1.9s var(--ez) .4s infinite}
 @keyframes gbreathe{0%{opacity:0;transform:scale(.97)}28%{opacity:.95}100%{opacity:0;transform:scale(1.1)}}
+#guide.closing .g-hole{display:none}
 #gpointer{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
 #gpointer path{fill:none;stroke:var(--sprout-lit,#D6E8A0);stroke-width:2;stroke-dasharray:5 7;stroke-linecap:round;opacity:.9;
   animation:gdash 1.2s linear infinite}

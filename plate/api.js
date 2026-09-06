@@ -6,6 +6,7 @@
    the server's handler with the disk replaced by the home in memory, and every write is
    flushed to IndexedDB before the reply, so a reload after a save finds it. */
 import { flush, wipe } from './fs.js';
+import { ownRestored } from './seeds.js';
 import { readRows, formatDicts } from './csv.js';
 import { ConfigError, PyValueError, pyRound } from './py.js';
 import { MarkerRegistry } from './markers.js';
@@ -20,7 +21,7 @@ import { ackPlate, appendWeighIn, loadLog, stepPlate, stepped as bodyStepped, un
 import { config as plateConfig } from './plate.js';
 import { today } from './pydate.js';
 import { buildSummary, buildTrend, buildPlan, suggestedDraw } from './planner.js';
-import { payload, payloadBuilt, getState, setState, recordEvents } from './plate.js';
+import { payload, payloadBuilt, getState, setState, recordEvents, tally } from './plate.js';
 import * as pc from './plate_config.js';
 import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
 import { readPdf, configure } from './pdftext.js';
@@ -154,6 +155,7 @@ export function installApi(home, ctx) {
     '/api/plate/config': () => payloadBuilt(home),
     '/api/plate/plan': () => payloadBuilt(home).plan,
     '/api/plate/state': (q) => ({ key: q.get('key') || '', value: getState(home, q.get('key') || '') }),
+    '/api/plate/tally': () => ({ tally: tally(home) }),
     '/api/config': (q) => {
       const name = q.get('name') || '';
       if (!CONFIG_FILES.includes(name)) return [{ error: 'unknown config' }, 404];
@@ -347,6 +349,7 @@ export function installApi(home, ctx) {
       await wipe();
       home.files.clear();
       for (const f of files) home.write(f.path, f.bytes);
+      ownRestored(home);                       /* what the backup brought is the person's own, whatever its bytes */
       await flush(home);
       return { ok: true, files: files.length };
     },
