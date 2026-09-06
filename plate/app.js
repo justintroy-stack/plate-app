@@ -207,7 +207,10 @@ function perCycle(order,k){let n=0;order.forEach(id=>{const m=MEALS[id];if(m&&m.
   SLOTS.forEach(sl=>{const opts=liveOpts(sl)||[];let a=0;opts.forEach(o=>{a+=(o.uses[k]||0);});if(opts.length)n+=a/opts.length*N;});return Math.round(n*10)/10;}
 const storeOf=k=>STORES[I[k].store]||null;      /* null: no store in play carries it */
 function runIn(F){const used=consumedSet(targetOrder());let m=H,w=null;
-  IORDER.forEach(k=>{const st=storeOf(k);if(!st||!st.countdown||!I[k].countdown||!used.has(k))return;if(F.L[k]<m){m=F.L[k];w=k;}});return{d:m,k:w};}
+  /* the store the countdown follows: any store flagged for it, else the first one in play, the
+     fallback countdownStore() already makes, so a home with no warehouse club counts down too */
+  const anyCd=SORDER.some(k=>STORES[k]&&STORES[k].countdown), follows=st=>anyCd?!!st.countdown:st.key===SORDER[0];
+  IORDER.forEach(k=>{const st=storeOf(k);if(!st||!follows(st)||!I[k].countdown||!used.has(k))return;if(F.L[k]<m){m=F.L[k];w=k;}});return{d:m,k:w};}
 function need(F,st){const used=consumedSet(targetOrder());
   return IORDER.filter(k=>I[k].store===st.key&&used.has(k)&&F.L[k]<=st.threshold).sort((a,b)=>F.L[a]-F.L[b]);}
 /* ---- a trip you call yourself: cover the next n meals from tonight. The one forecast read to
@@ -258,10 +261,16 @@ let EXTRA=false;                        /* the Also had picker is open */
 let TRIP={};                            /* a trip being planned, per store: the meals it covers */
 
 window.act={
- tab(t){tab=t;partial=false;EXTRA=false;OPEN=null;TRADED=null;render();if(t==='markers'&&MK===null)loadMarkers();},
+ tab(t){if(COMMITTED&&t!==tab){returnTo({tab:t,mk:'overview',at:null});location.reload();return;}
+   tab=t;partial=false;EXTRA=false;OPEN=null;TRADED=null;render();if(t==='markers'&&MK===null)loadMarkers();},
  theme(){if(window.plateTheme)window.plateTheme();render();},
+ /* You, from the round control in the masthead: your own settings, food-first. A second tap
+    on the control goes back to the tab it was opened from; a card id lands on that card. */
+ you(at){if(tab==='you'&&!at){tab=YOUFROM||'tonight';render();return;}
+   if(tab!=='you')YOUFROM=tab;tab='you';OPEN=null;MSG='';
+   if(at)SCROLLTO=at;render();if(!at)window.scrollTo({top:0,behavior:'smooth'});if(MK===null)loadMarkers();},
  begin(s){S.inv={...EMPTY};if(s)S.inv=stockedFor();S.init=true;S.pending={};S.applied=[];S.gate0={};tab=s?'tonight':'kitchen';adoptPlan();persist();render();
-   if(!s)say('Empty. Your first run is ready on List.');},
+   if(!s)say('Empty. Your first list is on Kitchen.');},
  planB(o){planB=o&&!!PLANB;partial=false;render();},
  swap(){const p=posAt(0),q=posAt(1),t=S.order[p];S.order[p]=S.order[q];S.order[q]=t;
    planB=false;TRADED=MEALS[S.order[q]]?MEALS[S.order[q]].name:null;persist();render();
@@ -321,7 +330,7 @@ window.act={
      r.file=f;r.manual=manual;r.opts=opts;
      r.edit=r.rows.map(x=>({test_name:x.test_name,value:x.value,unit:x.unit,ref_range:x.ref_range,lab_flag:x.lab_flag,panel:x.panel,marker:x.marker,status:x.status,keep:true,open:false}));
      ING=r;
-     if(commit&&r.result){MK=null;FILES=null;TREND=null;MKFILL=true;say('Committed. '+r.result.written+' new rows written.');dinnerAfter(r);}}
+     if(commit&&r.result){MK=null;FILES=null;TREND=null;MKFILL=true;COMMITTED=true;say('Committed. '+r.result.written+' new rows written.');dinnerAfter(r);}}
    catch(e){ING={file:f,manual:manual,opts:opts,error:e.message,edit:edit,info:info,markers:MKCAT};}
    render();if(MK===null)loadMarkers();},
  /* results typed from a paper report, or one the reader could not read: the same preview */
@@ -420,7 +429,7 @@ window.act={
         just chosen; saved as-is it would come back as fourteen slots the new plan leaves out and
         the planner would swap every one. An empty order is what loadState reads as "the
         baseline", and after the reload the baseline is the chosen plan's own rotation. */
-     S.order=[];S.setup=true;await store.set('plate:v8',JSON.stringify(S));
+     S.order=[];S.setup=true;S.guide=true;await store.set('plate:v8',JSON.stringify(S));
      say('Building your rotation.');setTimeout(()=>location.reload(),350);
    }catch(e){FRMSG=e.message;render();}},
  /* About you: a typed value is kept, and the host is asked for the estimate once the card is
@@ -520,10 +529,10 @@ window.act={
    note(planB?'first_planb':'first_log');
    snapshot(planB?'plan_b':'full');
    report(planB?'plan_b':'full',true,SLOTS.map(sl=>sl.id));
-   const wasB=planB;planB=false;
+   const wasB=planB,before={...S.inv};planB=false;
    deduct(draw);S.cursor++;S.checked=[];persist();render();
    const lead=wasB?'Plan B logged. The freezer stayed sealed.':'Logged. Stock updated.';
-   TRADED=null;say(lead,logLine(lead));fxSettle('Meal '+S.cursor+' logged',mealAt(0).name+' is next');},
+   TRADED=null;say(lead,logLine(lead));fxSettle(settleInfo(draw,before,wasB?'Plan B: the freezer stayed sealed':'Ate it all'));},
  openPartial(){partial=true;pOven=false;EXTRA=false;render();},
  openExtra(){EXTRA=true;partial=false;render();},
  closeExtra(){EXTRA=false;render();},
@@ -541,10 +550,10 @@ window.act={
    note(pOven&&planB?'first_planb':'first_log');note('first_partial');
    snapshot(pOven&&planB?'plan_b':'partial');
    report(pOven&&planB?'plan_b':'partial',pOven,[...S.checked]);
-   planB=false;
+   const before={...S.inv};planB=false;
    deduct(draw);S.cursor++;S.checked=[];partial=false;persist();render();
    TRADED=null;say('Logged what you ticked.',logLine('Logged what you ticked.'));
-   fxSettle('Meal '+S.cursor+' logged',mealAt(0).name+' is next');},
+   fxSettle(settleInfo(draw,before,'In part: what you ticked'));},
  /* The last log is undoable until the next one. A deliberate undo is the one thing besides
     Start over that may move the cursor back, so it carries the same deliberate stamp and
     wins the sync against the other device's copy. The server removes the log row, because
@@ -602,20 +611,28 @@ window.act={
    rows.forEach(r=>setInv(r.k,(S.inv[r.k]||0)+r.units));
    delete TRIP[sk];persist();render();say(st.name+' trip logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
  closeNote(){NOTE=null;render();},
+ /* the guide: Skip puts the step it is showing behind you for good; the line finds the control */
+ guideSkip(){const p=guidePlan(guideView());if(p&&p.key&&!S.seen.includes(p.key))S.seen.push(p.key);persist();guideSync();},
+ guideFind(){if(GTARGET&&GTARGET.scrollIntoView)GTARGET.scrollIntoView({block:'center',behavior:'smooth'});},
  notNow(){if(!S.seen.includes('report_nudge'))S.seen.push('report_nudge');persist();render();},
  closeFlip(){const g=document.getElementById('gate');g.innerHTML='';},
  reset(){S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:S.flav,init:false,pending:{},applied:[],
-   gate0:{},seen:[],reset_at:Date.now(),last:null,setup:true};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
+   gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
 };
 
 /* What the log just did, said in the units the system owns: meals and cycles, never dates. */
+/* the stock standing between a lab result and the slot it wants, in one sentence, or nothing */
+function gateLine(){
+  const live=SWAPS.filter(s=>S.order.includes(s.from)&&S.pending[s.key]!=null);
+  if(!live.length)return '';
+  const s=live[0],rem=Math.round(S.pending[s.key]*10)/10;
+  return rem>0?rem+' '+(s.gate_unit||'')+' of '+(s.gate_name||'stock')+' left before slot '+(S.order.indexOf(s.from)+1)+' becomes '+s.to_name+'.'
+              :(s.gate_name||'The stock')+' is gone. Slot '+(S.order.indexOf(s.from)+1)+' becomes '+s.to_name+' at the next log.';
+}
 function logLine(lead){
   const parts=[lead,'Meal '+(S.cursor%N||N)+' of cycle '+(Math.floor((S.cursor-1)/N)+1)+'.'];
   if(S.cursor>0&&S.cursor%N===0)parts.push('Cycle '+(S.cursor/N)+' closed with '+N+' meals logged.');
-  const live=SWAPS.filter(s=>S.order.includes(s.from)&&S.pending[s.key]!=null);
-  if(live.length){const s=live[0],rem=Math.round(S.pending[s.key]*10)/10;
-    parts.push(rem>0?rem+' '+(s.gate_unit||'')+' of '+esc(s.gate_name||'stock')+' left before slot '+(S.order.indexOf(s.from)+1)+' becomes '+s.to_name+'.'
-                   :s.gate_name+' is gone. Slot '+(S.order.indexOf(s.from)+1)+' becomes '+s.to_name+' at the next log.');}
+  const g=gateLine();if(g)parts.push(g);
   return parts.join(' ');
 }
 
@@ -642,7 +659,7 @@ function diff(F,run){
    swallowed and scrolling stalled for a second or two. There is no iframe now.
    ========================================================================== */
 
-let MK=null, MKAT=null, MKLOAD=false, EXPLAIN={}, OPEN=null, EXON=false, TRADED=null;
+let MK=null, MKAT=null, MKLOAD=false, EXPLAIN={}, OPEN=null, EXON=false, TRADED=null, YOUFROM=null;
 
 const VIEWS=[['tonight','Tonight'],['rotation','Rotation'],['kitchen','Kitchen'],['markers','Markers']];
 const NAVGL={
@@ -713,69 +730,109 @@ function noteCard(){
 }
 
 /* ==========================================================================
-   THE SETTLE — the one daily action, given a real moment.
-   A particle field on a canvas: embers launch from the floor of the chamber
-   with turbulence and drag, glow additively, and cool from near-white through
-   ember to deep red as they climb. The chassis never moves; only the readings
-   do, so with Reduce Motion on nothing is lost but the movement.
+   THE LEDGER — the one daily action, given a moment that means what happened.
+   A sheet rises from the bottom edge in ink. The plate drawn on it holds what
+   tonight used as dots, one handful per unit of stock in the colour of the
+   zone it came from; the plate tilts and they fall into the rows below, each
+   row's count rolling from what was there to what is left; then the next
+   meal. Food words and numbers, never praise. The page underneath has already
+   logged the meal and scrolled to the new plate, which reads in as the sheet
+   goes. With Reduce Motion on the sheet never comes: the words are in the
+   live region and the page is already right. This replaced a field of embers
+   with "Meal 12 logged" set over it in white, which celebrated, and the
+   wrong thing. If anything here throws, the meal is still logged.
    ========================================================================== */
-let FIREP=[], FIRERAF=null, FIREN=0;
-function fireSize(){
-  const c=document.getElementById('fire'); if(!c)return null;
-  const dpr=Math.min(window.devicePixelRatio||1,2), w=innerWidth, h=innerHeight;
+let LG={t:[],raf:null,on:false};
+const ZCOL={freezer:'--frost',fridge:'--sprout',pantry:'--clay'};
+const cssVar=n=>(getComputedStyle(document.documentElement).getPropertyValue(n)||'').trim()||'#FFFFFF';
+/* what the log did, for the sheet: each item tonight used, before and after. The plate's own
+   ingredients first, in the recipe's order, then the cold block by the share of its stock the
+   night took; a raw quantity would rank an ounce of cheese over a pound of beef. */
+function settleInfo(draw,before,how){
+  const q=v=>Math.round((v||0)*100)/100;
+  const hot=(S.last&&MEALS[S.last.meal_id])?Object.keys(MEALS[S.last.meal_id].uses||{}):[];
+  const rows=Object.keys(draw||{}).filter(k=>draw[k]>0&&I[k]).map(k=>({name:I[k].name,used:q(draw[k]),before:q(before[k]),after:q(S.inv[k]),unit:I[k].unit,zone:I[k].zone,
+    hot:hot.indexOf(k),share:draw[k]/Math.max(before[k]||0,draw[k])}));
+  rows.sort((a,b)=>((a.hot<0)-(b.hot<0))||(a.hot>=0&&b.hot>=0?a.hot-b.hot:0)||(b.share-a.share));
+  return {cursor:S.cursor,meal:S.last?S.last.meal:mealAt(-1).name,how:how,rows:rows,next:mealAt(0).name,gate:gateLine()};
+}
+/* a number that changed rolls to its new value */
+function roll(el,from,to,dur){
+  const dec=(Math.abs(from-Math.round(from))>1e-6||Math.abs(to-Math.round(to))>1e-6)?1:0, t0=performance.now();
+  const f=()=>{const k=Math.min(1,(performance.now()-t0)/dur), e=1-Math.pow(1-k,3);
+    el.textContent=(from+(to-from)*e).toFixed(dec);
+    if(k<1&&LG.on)requestAnimationFrame(f);else el.textContent=to.toFixed(dec);};
+  requestAnimationFrame(f);
+}
+/* the plate: a disc seen from above with tonight's food resting on it; at the release it tilts
+   toward you and the food slides off and falls, fading where the rows begin */
+function ledgerPlate(rows,release){
+  const c=document.querySelector('#ledger canvas'); if(!c)return;
+  const dpr=Math.min(window.devicePixelRatio||1,2), w=c.clientWidth||320, h=c.clientHeight||168;
   c.width=Math.round(w*dpr); c.height=Math.round(h*dpr);
-  c.style.width=w+'px'; c.style.height=h+'px';
-  c.getContext('2d').setTransform(dpr,0,0,dpr,0,0);
-  return {w,h,c};
+  const x=c.getContext('2d'); x.setTransform(dpr,0,0,dpr,0,0);
+  const cx=w/2, cy=h*0.5, R=Math.min(70,h*0.4);
+  const dots=[];
+  rows.forEach(r=>{const col=cssVar(ZCOL[r.zone]||'--clay'), n=Math.min(18,Math.max(3,Math.round(4+14*(r.share||0))));
+    for(let j=0;j<n;j++){const a=Math.random()*6.283, d=Math.sqrt(Math.random())*R*0.74;
+      dots.push({u:Math.cos(a)*d,v:Math.sin(a)*d,r:2.2+Math.random()*2.6,col:col,vx:0,vy:0,y:null,a:1,go:Math.random()*180});}});
+  const t0=performance.now();
+  const frame=()=>{
+    const t=performance.now()-t0;
+    x.clearRect(0,0,w,h);
+    const k=Math.max(0,Math.min(1,(t-release)/560)), e=1-Math.pow(1-k,3), ry=1-0.7*e;
+    x.save(); x.translate(cx,cy);
+    x.beginPath(); x.ellipse(0,0,R,R*ry,0,0,6.283); x.fillStyle='rgba(255,255,255,.07)'; x.fill();
+    x.lineWidth=2; x.strokeStyle='rgba(255,255,255,.34)'; x.stroke();
+    x.beginPath(); x.ellipse(0,0,R*0.62,R*0.62*ry,0,0,6.283); x.lineWidth=1; x.strokeStyle='rgba(255,255,255,.14)'; x.stroke();
+    let live=0;
+    dots.forEach(p=>{
+      let px,py;
+      if(t<release+p.go){px=p.u;py=p.v*ry;}
+      else{
+        if(p.y===null){p.y=p.v*ry;p.vx=(Math.random()-0.5)*0.8;p.vy=0.5+Math.random()*1.1;}
+        p.vy+=0.2; p.y+=p.vy; p.u+=p.vx; px=p.u; py=p.y;
+        if(py>h-cy-8)p.a-=0.09;
+      }
+      if(p.a<=0)return; live++;
+      x.globalAlpha=Math.max(0,p.a); x.fillStyle=p.col; x.beginPath(); x.arc(px,py,p.r,0,6.283); x.fill(); x.globalAlpha=1;
+    });
+    x.restore();
+    if(LG.on&&(live>0||t<release+600))LG.raf=requestAnimationFrame(frame);
+  };
+  LG.raf=requestAnimationFrame(frame);
 }
-function fireSpawn(w,h){
-  FIREP=[];
-  const n=w<420?130:190;
-  for(let i=0;i<n;i++)FIREP.push({x:w*(0.06+0.88*Math.random()),y:h*(0.58+Math.random()*0.5),
-    vx:(Math.random()-0.5)*0.55, vy:-(1.5+Math.random()*3.4), r:0.7+Math.random()*2.6,
-    life:0, max:60+Math.random()*70, w:0.6+Math.random()*1.6, ph:Math.random()*6.283});
+function ledgerHide(){
+  const L=document.getElementById('ledger'); if(!L||!LG.on)return;
+  LG.t.forEach(clearTimeout); LG.t=[]; if(LG.raf)cancelAnimationFrame(LG.raf); LG.raf=null; LG.on=false;
+  L.classList.remove('on'); L.onclick=null;
+  /* the new plate reads in as the sheet goes */
+  const h=document.getElementById('hero');
+  if(h){h.classList.add('settling');h.classList.add('punch');setTimeout(()=>{h.classList.remove('settling');h.classList.remove('punch');},1000);}
 }
-function fireFrame(){
-  const c=document.getElementById('fire'); if(!c)return;
-  const x=c.getContext('2d'), w=c.clientWidth, h=c.clientHeight;
-  x.clearRect(0,0,w,h); FIREN++;
-  const t=Math.min(1,FIREN/34), gy=h*(1.05-0.55*t);
-  const g=x.createRadialGradient(w/2,gy,0,w/2,gy,h*0.85);
-  g.addColorStop(0,'rgba(255,214,170,'+(0.5*(1-FIREN/95))+')');
-  g.addColorStop(0.32,'rgba(249,115,22,'+(0.38*(1-FIREN/95))+')');
-  g.addColorStop(1,'rgba(160,63,17,0)');
-  x.fillStyle=g; x.fillRect(0,0,w,h);
-  let alive=0;
-  x.globalCompositeOperation='lighter';
-  for(const p of FIREP){
-    p.life++; if(p.life>p.max)continue; alive++;
-    p.vx+=Math.sin(p.life*0.055+p.ph)*0.045*p.w; p.vy*=0.987; p.vy-=0.012;
-    p.x+=p.vx; p.y+=p.vy;
-    const k=p.life/p.max, a=k<0.12?k/0.12:Math.pow(1-k,1.7);
-    const cg=Math.round(235-150*k), cb=Math.max(0,Math.round(190-180*k)), rad=p.r*(1+k*0.5)*3.4;
-    const pg=x.createRadialGradient(p.x,p.y,0,p.x,p.y,rad);
-    pg.addColorStop(0,'rgba(255,'+cg+','+cb+','+(a*0.95)+')');
-    pg.addColorStop(1,'rgba(255,'+Math.round(cg*0.5)+',0,0)');
-    x.fillStyle=pg; x.beginPath(); x.arc(p.x,p.y,rad,0,6.2832); x.fill();
-  }
-  x.globalCompositeOperation='source-over';
-  if(alive>0&&FIREN<150)FIRERAF=requestAnimationFrame(fireFrame);
-  else{cancelAnimationFrame(FIRERAF);FIRERAF=null;x.clearRect(0,0,w,h);c.classList.remove('on');}
-}
-/* The moment rides on top of the real log, which has already happened. If anything here
-   throws, the meal is still logged and the page is still correct. */
-function fxSettle(lead,sub){
-  if(RM.matches)return;
+function fxSettle(info){
+  if(RM.matches||!info)return;
   try{
-    const ch=document.getElementById('hero');
-    if(ch){ch.classList.add('punch');setTimeout(()=>ch.classList.remove('punch'),460);}
-    const f=fireSize();
-    if(f){fireSpawn(f.w,f.h);FIREN=0;f.c.classList.add('on');if(!FIRERAF)FIRERAF=requestAnimationFrame(fireFrame);}
-    const t=document.getElementById('bloomtxt');
-    if(t){document.getElementById('bloomBig').textContent=lead;
-      document.getElementById('bloomSm').textContent=sub||'';
-      t.classList.add('go');setTimeout(()=>t.classList.remove('go'),1500);}
-    if(ch){ch.classList.add('settling');setTimeout(()=>ch.classList.remove('settling'),1000);}
+    const L=document.getElementById('ledger'); if(!L)return;
+    if(LG.on)ledgerHide();
+    const at=(ms,fn)=>LG.t.push(setTimeout(fn,ms));
+    const rows=info.rows.slice(0,5), more=info.rows.length-rows.length, q=v=>String(Math.round(v*10)/10);
+    const release=440, rowAt=i=>release+i*90;
+    L.innerHTML='<canvas></canvas>'+
+      '<div class="ledger-eye lrise" style="animation-delay:120ms">Meal '+(info.cursor%N||N)+' · cycle '+(Math.floor((info.cursor-1)/N)+1)+' · logged</div>'+
+      '<div class="ledger-big lrise" style="animation-delay:160ms">'+esc(info.meal)+'</div>'+
+      '<div class="ledger-how lrise" style="animation-delay:200ms">'+esc(info.how)+'</div>'+
+      '<div class="ledger-rows">'+rows.map((r,i)=>{const u=r.unit==='each'?'':esc(r.unit)+' ';return '<div class="ledger-row lrise" style="animation-delay:'+rowAt(i)+'ms"><span><span class="ledger-name">'+esc(r.name)+'</span>'+
+        '<span class="ledger-meta">'+esc(q(r.used))+' '+u+'tonight</span></span>'+
+        '<span class="ledger-val"><b>'+esc(q(r.before))+'</b><span class="u">'+u+'left</span></span></div>';}).join('')+
+        (more>0?'<div class="ledger-row lrise" style="animation-delay:'+rowAt(rows.length)+'ms"><span class="ledger-meta">and '+more+' more thing'+(more===1?'':'s')+' from stock</span></div>':'')+
+        (rows.length?'':'<div class="ledger-row lrise" style="animation-delay:'+release+'ms"><span class="ledger-meta">Nothing left the stock.</span></div>')+'</div>'+
+      '<div class="ledger-next lrise" style="animation-delay:'+(rowAt(rows.length)+320)+'ms"><span>Next up: <b>'+esc(info.next)+'</b>'+(info.gate?'<span class="ledger-meta">'+esc(info.gate)+'</span>':'')+'</span>'+icon('arrow')+'</div>';
+    L.classList.add('on'); LG.on=true; L.onclick=ledgerHide;
+    window.scrollTo({top:0,behavior:'smooth'});
+    ledgerPlate(rows,release);
+    rows.forEach((r,i)=>at(rowAt(i)+140,()=>{const b=L.querySelectorAll('.ledger-row b')[i];if(b)roll(b,r.before,r.after,680);}));
+    at(info.hold?600000:2900,ledgerHide);
   }catch(e){}
 }
 
@@ -812,7 +869,7 @@ async function loadMarkers(){
     if(c){EXPLAIN=c.ex||EXPLAIN;MK={s:c.s,p:c.p,diet:c.diet||null};MKAT=c.at;}
     else MK='none';
   }
-  MKLOAD=false; if(tab==='markers')render();
+  MKLOAD=false; if(tab==='markers'||tab==='you')render();
 }
 
 /* The food targets, named the way he would say them rather than the way they are stored. */
@@ -961,7 +1018,6 @@ function viewMarkers(){
   if(MKVIEW==='body')return h+viewBody();
   if(MKVIEW==='plan')return h+viewPlan();
   if(MKVIEW==='reports')return h+viewReports();
-  if(MKVIEW==='profile')return h+viewProfile();
   return h+viewOverview();
 }
 let ALLOPEN=false, ATTNALL=false, MKFILL=false, SINCEALL=false;
@@ -1151,7 +1207,7 @@ const statBox=(label,num,unit)=>'<div class="stat"><span class="t-label">'+esc(l
 function viewTonight(F){
   const m=activeMeal(), nx=mealAt(1), kit=planB?null:kitAt(0), ct=coldTot(0,ROT);
   const run=runIn(F), cs=countdownStore(), st=run.d<=2?'now':run.d<=6?'watch':'';
-  let top='', main='', aside='';
+  let top=nowCard(F), main='', aside='';
 
   top+='<section class="card card--lit hero" id="hero" data-family="sprout" aria-label="Tonight"><div class="hero-in">'+
     '<div class="hero-eyebrow"><span class="pip"></span><span>'+
@@ -1229,7 +1285,7 @@ function viewTonight(F){
     });
     if(occNow!==null)main+='</div></section>';
 
-    main+='<section class="card card--tint" data-family="frost" style="display:flex;gap:var(--s4);align-items:flex-start">'+
+    main+='<section class="card card--tint" data-family="frost" id="thawcard" style="display:flex;gap:var(--s4);align-items:flex-start">'+
       '<span class="chip chip--ontint">'+icon(nx.thaw?'frost':'check')+'</span><div style="flex:1;min-width:0">'+
       '<span class="t-label">'+(nx.thaw?'Move to the fridge after this':'Nothing to thaw')+'</span>'+
       '<p class="t-body" style="margin-top:var(--s1);color:var(--ink)">'+(nx.thaw?'<b>'+esc(I[nx.thaw]?I[nx.thaw].name:nx.thaw)+'.</b> Next up is '+esc(nx.name.toLowerCase())+'.'
@@ -1249,7 +1305,8 @@ function viewTonight(F){
         '<button class="btn btn--sm btn--ink" type="button" data-fk="untrade" onclick="act.unswap()">Undo</button></div>':'')+
       (PLANB&&!planB?'<button class="btn" data-fk="planb" onclick="act.planB(true)">Nothing thawed? '+esc(PLANB.name)+'</button>':'')+
       (planB?'<button class="btn" data-fk="planb" onclick="act.planB(false)">Back to the planned meal</button>':'')+
-      '</div><p class="t-note" style="margin-top:var(--s3)">'+esc(nextGoal(F))+'</p></section>';
+      '</div><p class="t-note" style="margin-top:var(--s3)">'+esc(nextGoal(F))+'</p>'+
+      '<p class="t-note" style="margin-top:var(--s2)">Ate out? Nothing to log. Tonight\'s plate waits, and a night not logged costs nothing.</p></section>';
     if(EXTRA)aside+='<section class="card" data-family="sprout"><span class="t-label">Also had</span>'+
       '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move. A thing the plan never held has no stock here, so it stays out.</p><div class="rows">'+
       extraOptions().map(o=>'<button class="row" type="button" data-fk="extra:'+esc(o.key)+'" onclick="act.extra(\''+esc(o.key)+'\')"><span class="row__body"><span class="row__title">'+esc(o.label)+'</span>'+
@@ -1274,6 +1331,37 @@ function viewTonight(F){
       '<button class="btn" data-fk="cancel" onclick="act.cancelPartial()">Back</button></div></section>';
   }
   return '<div class="stack"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
+}
+
+/* ---- NOW: what to do, in the loop's order, above the plate. A store run while its list is
+   open, with the count; the thaw for the next meal; a report while none is on file and the
+   invitation was not declined; the plate step while the scale proposes one. Each line is a
+   tap to its control, and when nothing is due it says so. Nothing on it is a clock: every
+   line is a list, a meal or a fact on file. The plate below is the line that never leaves,
+   which is why it is not listed. Phase 7, decision 7: a stranger on the walk had to guess that
+   shopping comes before cooking. ------------------------------------------------------------ */
+function nowCard(F){
+  const rows=[];
+  SORDER.forEach(sk=>{const st=STORES[sk],items=need(F,st);if(!items.length)return;
+    const first=items.every(k=>(S.inv[k]||0)===0), k0=items[0];
+    rows.push({ico:'bag',fam:'clay',fk:'now:shop:'+sk,go:"act.tab('kitchen');act.jumpK('k-store-"+esc(sk)+"')",
+      title:esc(st.name)+' run · '+items.length+' to buy',
+      meta:first?'Nothing on the shelf yet. Shop this first, then cook.':esc(I[k0].name)+(F.L[k0]<=0?' is out.':' runs out first.')});});
+  const nx=mealAt(1);
+  if(nx.thaw&&!planB)rows.push({ico:'frost',fam:'frost',fk:'now:thaw',go:"act.jumpK('thawcard')",
+    title:'Move '+esc(I[nx.thaw]?I[nx.thaw].name.toLowerCase():nx.thaw)+' to the fridge',
+    meta:'After tonight. Next up is '+esc(nx.name.toLowerCase())+'.'});
+  if(LABS.draws===0&&!S.seen.includes('report_nudge'))rows.push({ico:'marker',fam:'plum',fk:'now:report',go:"act.tab('markers');act.mk('reports')",
+    title:'Add a lab report',meta:'One from the last year is enough to move a night or two of dinner.'});
+  if(CFG.plate_proposal)rows.push({ico:'check',fam:'sprout',fk:'now:plate',go:"act.jumpK('platecard')",
+    title:'The scale proposes a plate step',meta:'Read it, then say yes or leave it.'});
+  let h='<section class="card" id="now" aria-label="What to do now"><div class="split"><span class="t-label">Now</span>'+
+    '<span class="mono" style="color:var(--ink-3)">'+(rows.length?rows.length+' thing'+(rows.length===1?'':'s')+' due':'in order')+'</span></div>';
+  if(!rows.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">Nothing due but dinner.</p></section>';
+  h+='<div class="rows" style="margin-top:var(--s1)">'+rows.map(r=>'<button class="row" type="button" data-fk="'+esc(r.fk)+'" onclick="'+r.go+'">'+
+    '<span class="chip chip--round" data-family="'+r.fam+'">'+icon(r.ico)+'</span>'+
+    '<span class="row__body"><span class="row__title">'+r.title+'</span><span class="row__meta">'+r.meta+'</span></span>'+icon('arrow')+'</button>').join('')+'</div>';
+  return h+'<p class="t-note" style="margin-top:var(--s3)">Then cook the plate below and log it.</p></section>';
 }
 
 /* The rotation, in the system's parts: one lit card that says where you are and carries the
@@ -1467,7 +1555,7 @@ function viewKitchen(F){
   const nost=UNSUP.filter(k=>used.has(k));
   if(nost.length)hero+='<section class="card card--tint" data-family="clay"><span class="t-label">No store carries these</span>'+
     '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+esc(nost.map(k=>I[k].name).join(', '))+'. The rotation uses them, but no store in play carries them, so they stay off every list and out of the countdown.</p>'+
-    '<button class="btn btn--sm btn--quiet" type="button" data-fk="gostores" style="margin-top:var(--s2);padding-left:0" onclick="act.tab(\'markers\');act.mk(\'profile\')">Choose stores '+icon('arrow')+'</button></section>';
+    '<button class="btn btn--sm btn--quiet" type="button" data-fk="gostores" style="margin-top:var(--s2);padding-left:0" onclick="act.you(\'stores\')">Choose stores '+icon('arrow')+'</button></section>';
   const nocook=NOCOOK.filter(k=>MEALS[k]&&S.order.includes(k));   /* only what is in the rotation, as below */
   if(nocook.length)hero+='<section class="card card--tint" data-family="ember"><span class="t-label">Not for this kitchen</span>'+
     '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+esc(nocook.map(k=>MEALS[k].name+' ('+MEALS[k].why_not+')').join(', '))+'. '+
@@ -1481,7 +1569,7 @@ function viewKitchen(F){
     '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(noreg.length?esc(noreg.map(k=>MEALS[k].name+' (has '+list(MEALS[k].excluded)+')').join(', '))+'. ':'')+
     (nocold.length?'From the cold block: '+esc(nocold.map(c=>c.label).join(', '))+'. ':'')+
     'Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while it stays left out.</p>'+
-    '<button class="btn btn--sm btn--quiet" type="button" data-fk="goplan" style="margin-top:var(--s2);padding-left:0" onclick="act.tab(\'markers\');act.mk(\'profile\')">Change how you eat '+icon('arrow')+'</button></section>';
+    '<button class="btn btn--sm btn--quiet" type="button" data-fk="goplan" style="margin-top:var(--s2);padding-left:0" onclick="act.you(\'regimen\')">Change how you eat '+icon('arrow')+'</button></section>';
 
   /* what to buy, one card per store */
   let main='';
@@ -1569,6 +1657,7 @@ function viewKitchen(F){
    the one commitment on a form. The same page at both sizes; the Mac has
    more room, and a stack--top puts the first card across both columns.
    ========================================================================== */
+let COMMITTED=false;               /* a report was committed on this page: the plan it holds is the old one, so leaving the tab fetches the page again */
 let MKVIEW='overview', TREND=null, TRENDM='apob', BODY=null, ASSOC=null, DRAW=null, PLANQ={}, MKCAT=[],
     FILES=null, ING=null, HIST=null, LAN=null, LOADING={}, MSG='';
 
@@ -1586,7 +1675,7 @@ function want(key,path,assign){
   if(LOADING[key])return;
   LOADING[key]=true;
   api(path).then(v=>{assign(v);}).catch(e=>{assign({error:e.message});})
-    .finally(()=>{LOADING[key]=false;if(tab==='markers')render();});
+    .finally(()=>{LOADING[key]=false;if(tab==='markers'||tab==='you')render();});   /* You fetches too: the history, the device, the markers' diet */
 }
 const errBox=e=>'<div class="callout warn">'+esc(e)+'</div>';
 const loading=()=>'<p class="t-body">Loading…</p>';
@@ -1739,7 +1828,7 @@ function wireChart(root){
 
 /* ---- the chip row: Markers' sub-views -------------------------------------------------- */
 const MKVIEWS=[['overview','All markers'],['trend','Full history'],['body','Body'],
-               ['plan','Next draw'],['reports','Add a report'],['profile','Profile']];
+               ['plan','Next draw'],['reports','Add a report']];
 function chips(){
   return '<div class="chips" role="tablist">'+MKVIEWS.map(([k,l])=>
     '<button type="button" role="tab" data-fk="mkv:'+k+'" aria-current="'+(MKVIEW===k)+'" onclick="act.mk(\''+k+'\')">'+l+'</button>').join('')+'</div>';
@@ -1809,7 +1898,7 @@ function targetFrom(e,cal){
   if(cal&&cal.kcal_from_tracker)return 'From your food tracking app\'s estimate of what you burn, '+Math.round(cal.tracker_expenditure).toLocaleString()+' kcal a day over '+cal.days+' logged days, less your deficit of '+Math.round(cal.deficit)+'.';
   if(e&&e.missing&&!e.missing.length){const h=Math.floor(e.height_in/12),i=fmt(e.height_in-h*12);
     return 'Estimated from your body: '+fmt(e.weight_lb)+' lb, '+h+' ft'+(i!=='0'?' '+i:'')+', '+e.age+', '+(ACTWORD[e.activity]||e.activity)+', '+(e.goal==='hold'?'holding your weight':e.goal==='lose'?'losing '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week':'gaining '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week')+'. Within about 15 percent for any one person; the scale corrects it.';}
-  return 'Fill in About you under Profile, Your target, and the estimate appears here.';
+  return 'Fill in About you under You, top right, and the estimate appears here.';
 }
 function verdictWords(v){
   const n=v.points, s=v.slope==null?'':slopeWords(v.slope), band=bandWords(v.expected||[0,0]);
@@ -1833,7 +1922,7 @@ function viewBody(){
   if(tk)top+='<div class="stats stats--2" style="margin-top:var(--s3)">'+statBox('kcal a day',Math.round(tk.kcal||0).toLocaleString(),'')+statBox('Protein a day',Math.round(tk.protein_g||0),'g')+'</div>';
   top+='<p class="t-note" style="margin-top:var(--s3)">'+esc(targetFrom(e,cal))+'</p>'+
     '<p class="t-note" style="margin-top:var(--s2)"><b>'+esc(PLATE===1?'Plates as the recipes are written.':'Plates about '+Math.round(Math.abs(1-PLATE)*100)+' percent '+(PLATE<1?'smaller':'larger')+' than written.')+'</b>'+(w.plate_since?' Set on '+esc(w.plate_since)+'.':'')+'</p>'+
-    '<button class="btn btn--sm btn--quiet" type="button" data-fk="gotarget" style="margin-top:var(--s2);padding-left:0" onclick="act.mk(\'profile\');SCROLLTO=\'yourtarget\';render()">Change your target '+icon('arrow')+'</button></section>';
+    '<button class="btn btn--sm btn--quiet" type="button" data-fk="gotarget" style="margin-top:var(--s2);padding-left:0" onclick="act.you(\'yourtarget\')">Change your target '+icon('arrow')+'</button></section>';
   top+='<section class="card" data-family="frost"><div class="split"><span class="t-label">The scale</span><span class="mono" style="color:var(--ink-3)">'+(w.entries||0)+' weigh-in'+(w.entries===1?'':'s')+'</span></div>';
   if(w.latest)top+='<div class="stats stats--2" style="margin-top:var(--s3)">'+statBox('lb on '+w.latest.date,fmtN(w.latest.weight_lb),'')+statBox('Trend',fmtN(w.latest.trend_lb),'lb')+'</div>';
   if(w.trend&&w.trend.length>1)top+='<div class="split" style="margin-top:var(--s4)"><span class="t-label">Trend</span><span class="mono" style="color:var(--ink-3)">'+esc(w.trend[0].date)+' to '+esc(w.trend[w.trend.length-1].date)+'</span></div>'+spark(w.trend.map(p=>({date:p.date,v:p.trend_lb})),{h:64});
@@ -1934,7 +2023,7 @@ function viewReports(){
       '<span class="row__meta">'+(x.imported?'imported':'not imported')+'</span></span>'+
       '<button class="btn btn--sm" type="button" data-fk="trk:'+esc(x.file)+'" onclick="act.tracker(\''+esc(x.file)+'\')">Preview import</button></div>';});
     aside+='</div></section>';}
-  aside+='<p class="t-note" style="padding:0 var(--s2)">'+(LOCAL?'Reports stay on this device. Keep a backup after each upload: Profile, Your data.':'Files live in '+esc(f.raw_dir)+'. Dropping one there works too.')+'</p>';
+  aside+='<p class="t-note" style="padding:0 var(--s2)">'+(LOCAL?'Reports stay on this device. Keep a backup after each upload: You, top right, then Your data.':'Files live in '+esc(f.raw_dir)+'. Dropping one there works too.')+'</p>';
   return '<div class="stack stack--top"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
 function viewIngest(){
@@ -2264,7 +2353,7 @@ function viewFirstRun(){
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Dinner carries the recipe and is always on. The rest are quick options that rotate on their own.</p>'+
     fieldOccasions('fr-occ-',occOn)+'</section>';
   h+='<section class="card"><span class="t-label">Where you shop</span>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Each store gets its own list and pack sizes. A store can be added later under Profile.</p><div class="rows">'+
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Each store gets its own list and pack sizes. A store can be added later under You, top right.</p><div class="rows">'+
     SCAT.map(sk=>'<div class="row"><input class="tick" type="checkbox" id="fr-store-'+esc(sk)+'" data-fk="fr-store-'+esc(sk)+'"'+(SORDER.includes(sk)?' checked':'')+'>'+
       '<label class="row__body" for="fr-store-'+esc(sk)+'"><span class="row__title">'+esc(STORES[sk].name)+'</span><span class="row__meta">'+esc(String(STORES[sk].cadence||'').replace(/^\w/,c=>c.toUpperCase()))+'</span></label></div>').join('')+'</div></section>';
   h+='<section class="card" data-family="plum"><span class="t-label">About you</span>'+
@@ -2280,7 +2369,7 @@ let SPICK=null,SMSG='';                 /* the picker's unsaved choice: {shop:[.
 let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cadence:'',countdown:false,msg:''};   /* the editor's typed values, kept across a redraw */
 /* A save fetches the page again, because the catalog is resolved on the Mac and rides inside
    it; this remembers where he was so the reload lands him back on the editor. */
-function returnTo(extra){try{sessionStorage.setItem('lt:return',JSON.stringify(Object.assign({tab:'markers',mk:'profile',at:'sed'},extra||{})));}catch(e){}}
+function returnTo(extra){try{sessionStorage.setItem('lt:return',JSON.stringify(Object.assign({tab:'you',mk:'overview',at:'sed'},extra||{})));}catch(e){}}
 let SCROLLTO=null;                      /* an element id the next render that draws it scrolls to */
 function spick(){if(!SPICK)SPICK={shop:SORDER.slice(),picks:Object.assign({},CFG.store_picks||{})};return SPICK;}
 function viewStores(){
@@ -2289,7 +2378,7 @@ function viewStores(){
   const at=k=>{const o=I[k].offers||{},p=P.picks[k];if(p&&o[p]&&P.shop.includes(p))return p;return P.shop.find(s=>o[s])||null;};
   const left=IORDER.filter(k=>used.has(k)&&!at(k));
   const carried=sk=>live.filter(k=>(I[k].offers||{})[sk]).length;
-  let h='<section class="card" data-family="clay"><div class="split"><span class="t-label">Stores</span><span class="mono" style="color:var(--ink-3)">'+P.shop.length+' of '+SCAT.length+' in play</span></div>'+
+  let h='<section class="card" id="stores" data-family="clay"><div class="split"><span class="t-label">Stores</span><span class="mono" style="color:var(--ink-3)">'+P.shop.length+' of '+SCAT.length+' in play</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A store that is off drops out of the lists and the run countdown, and its pack sizes go with it.</p>';
   h+='<div class="rows">';
   SCAT.forEach(sk=>{const st=STORES[sk],on=P.shop.includes(sk);
@@ -2372,17 +2461,21 @@ function viewDevice(L){
     '<p class="t-note" style="margin-top:var(--s3)">Build '+esc(d.build||'')+' · pdf.js '+esc(d.pdfjs||'')+'</p></section>';
 }
 
-/* ---- PROFILE: pairing, the settings that pick your targets, and your health history ----- */
+/* ---- YOU: the person's own settings, from the round control in the masthead. Food first:
+   the target, how you eat, who eats, the kitchen, when you eat and the stores; then your data,
+   the lens and the tier, the health history, and the story last, as the reference. It was the
+   last chip of Markers, off the right edge of a row that did not look scrollable, with the
+   backup and the lens form ahead of every food setting a stranger came for. ----------------- */
 function viewProfile(){
   if(!HIST){want('hist','/api/history',v=>{HIST=v;});}
   if(!LAN){want('lan','/api/lan',v=>{LAN=v;});}
   if(!HIST)return '<div class="stack"><section class="card a-hero">'+loading()+'</section></div>';
   if(HIST.error)return '<div class="stack"><section class="card a-hero">'+errBox(HIST.error)+'</section></div>';
   const h0=HIST,tiers=['low','borderline','intermediate','high','very_high'],pr=h0.profile||{};
-  let top='';
-  if(LAN&&!LAN.error&&LAN.local)top+=viewDevice(LAN);
+  let data='';
+  if(LAN&&!LAN.error&&LAN.local)data+=viewDevice(LAN);
   else if(LAN&&!LAN.error){
-    top+='<section class="card" data-family="frost"><span class="t-label">Pair your phone</span>'+(LAN.lan
+    data+='<section class="card" data-family="frost"><span class="t-label">Pair your phone</span>'+(LAN.lan
       ?'<p class="t-body" style="margin:var(--s2) 0 var(--s3)">On the same Wi-Fi, open this on the phone once, then Share, Add to Home Screen. The icon keeps the code, so it works on its own afterwards.</p>'+
        '<div class="code">'+esc(LAN.url)+'</div>'+
        '<p class="t-note" style="margin-top:var(--s3)">If the name form does not load on your network, this one uses the address instead. It can change when the router reassigns it.</p>'+
@@ -2393,7 +2486,7 @@ function viewProfile(){
       '<p class="t-note" style="margin-top:var(--s4)">Or take everything with you: a backup is one file with every report, result, row and log, and Plateside on any other device restores from it.</p>'+
       '<div class="btnrow" style="margin-top:var(--s2)"><button class="btn" type="button" data-fk="bkup" onclick="act.backup()">Back up</button></div></section>';
   }
-  let main='<section class="card" data-family="plum"><span class="t-label">Profile</span><div class="formgrid" style="margin-top:var(--s3)">'+
+  let lens='<section class="card" id="lens" data-family="plum"><span class="t-label">Lens and risk tier</span><div class="formgrid" style="margin-top:var(--s3)">'+
     '<div class="field"><span>Which targets judge you</span><select id="lensSel" data-fk="lens">'+
       '<option value=""'+(!pr.guideline_lens?' selected':'')+'>Not chosen: conventional</option>'+
       '<option value="conventional"'+(pr.guideline_lens==='conventional'?' selected':'')+'>Conventional guidelines</option>'+
@@ -2402,15 +2495,15 @@ function viewProfile(){
     '<div class="field"><span>Routine draw cadence, months</span><input type="number" id="cadIn" data-fk="cad" value="'+esc(pr.draw_cadence_months||'')+'" min="1" max="60"></div>'+
     '<div class="field"><span>&nbsp;</span><button class="btn btn--ink" type="button" data-fk="profsave" onclick="act.saveProfile()">Save</button></div></div>'+
     '<p class="t-note" style="margin-top:var(--s3)">The lens decides which set of targets judges your values and drives the plan; both are always shown. The tier sets your LDL, non-HDL and ApoB targets. Decide it with your cardiologist or the PREVENT calculator.'+(LOCAL?'':' Files live in '+esc(h0.config_dir)+'.')+'</p>';
-  main+='</section>';
-  main+=storyCard();
-  main+=viewTargetCard(pr);
-  main+=viewRegimen();
+  lens+='</section>';
+  let top=viewTargetCard(pr);
+  let main=viewRegimen();
   main+=viewWhoEats();
   main+=viewKitchenCard();
   main+=viewOccasionsCard();
   main+=viewStores();
-  let aside=viewStoreEditor();
+  main+=viewStoreEditor();
+  let aside=data+lens;
   aside+='<section class="card" data-family="plum"><div class="split"><span class="t-label">Health history</span><span class="mono" style="color:var(--ink-3)">'+(h0.items||[]).length+' facts</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them.</p><div class="rows">';
   (h0.items||[]).forEach(x=>{aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
@@ -2428,18 +2521,120 @@ function viewProfile(){
     '<div class="field wide"><span>Detail</span><input id="hDetail" data-fk="hdetail"></div>'+
     '<div class="field"><span>&nbsp;</span><button class="btn btn--ink" type="button" data-fk="hadd" onclick="act.addHist()">Add</button></div></div>'+
     (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
+  aside+=storyCard();
   return '<div class="stack stack--top"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
 
+/* ==========================================================================
+   THE GUIDE — a light on the real control, not a screen of its own. After
+   setup the app walks a person through their first minutes on the real
+   screens: the page dims with a hole around the one control to touch next,
+   one line sits beside it, the light waits for the real action and then
+   moves. Skip is always one tap. The steps are the daily loop read from the
+   state, never a script: shop and Bought it while the kitchen is empty; cook
+   and Ate it all before the first log; add a report while none is on file;
+   weigh in once one is; and after a second draw, what moved. Each is once
+   ever, in S.seen, like the one-time notes. On only for a home set up through
+   the interview from now on (S.guide), so an installed copy never sees it.
+   The story card stays as the reference. Decision 6 of Phase 7, his words:
+   "im not looking for it to be a written guide."
+   ========================================================================== */
+/* GUIDE-START — the choosing is pure: a view of the state in, one step out, so tests can lift
+   this block by its markers and run it in node against invented homes. */
+const GUIDE=[
+  {key:'guide_shop',due:v=>v.empty,done:v=>!v.empty,hops:[
+    {when:v=>v.tab!=='kitchen',sel:'[data-fk="tab:kitchen"]',line:'Your first shopping list is on Kitchen.'},
+    {when:v=>true,sel:'[data-fk^="restock:"],[data-fk^="trip-bought:"]',line:'Shop this list. Back home, tap Bought it, and the stock starts counting down.'}]},
+  {key:'guide_log',due:v=>!v.empty&&v.cursor===0,done:v=>v.cursor>0,hops:[
+    {when:v=>v.tab!=='tonight',sel:'[data-fk="tab:tonight"]',line:'Tonight is the plate to cook.'},
+    {when:v=>true,sel:'[data-fk="eat"]',line:'Cook this. When you have eaten, tap Ate it all: the stock moves and the next plate reads in.'}]},
+  {key:'guide_report',due:v=>v.cursor>0&&v.draws===0&&!v.declined,done:v=>v.draws>0||(v.tab==='markers'&&v.mk==='reports'),hops:[
+    {when:v=>v.tab==='tonight',sel:'[data-fk="addreport"]',line:'Have a lab report? Add it, and a night or two of dinner changes.'},
+    {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Your lab reports live under Markers.'},
+    {when:v=>true,sel:'[data-fk="mkv:reports"]',line:'Add a report: a PDF from any lab, or the numbers typed from paper.'}]},
+  {key:'guide_weigh',due:v=>v.draws>0&&v.weighed!==true,done:v=>v.weighed===true,hops:[
+    {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'Weigh in under Markers, and after three the plate corrects itself.'},
+    {when:v=>v.mk!=='body',sel:'[data-fk="mkv:body"]',line:'Body holds the scale.'},
+    {when:v=>true,sel:'[data-fk="weigh"]',line:'Type your weight and log it. Three weigh-ins, and the plate corrects itself.'}]},
+  {key:'guide_moved',due:v=>v.draws>=2&&v.moved!==false,done:v=>false,arrive:true,hops:[
+    {when:v=>v.tab!=='markers',sel:'[data-fk="tab:markers"]',line:'A second draw is on file. Markers says what moved.'},
+    {when:v=>v.mk!=='overview',sel:'[data-fk="mkv:overview"]',line:'All markers: since your last draw, what moved.'},
+    {when:v=>true,sel:'#since',line:'What moved between the two draws, then and now, and what dinner did about it.'}]}
+];
+/* the first step not yet seen: {done:key} when the state already did it, else the hop to light */
+function guidePlan(v){
+  if(!v||!v.on)return null;
+  for(const s of GUIDE){
+    if(v.seen.includes(s.key))continue;
+    if(s.done(v))return {done:s.key};
+    if(!s.due(v))continue;
+    const i=s.hops.findIndex(h=>h.when(v)), h=s.hops[i];
+    return {key:s.key,sel:h.sel,line:h.line,last:i===s.hops.length-1,arrive:!!s.arrive};
+  }
+  return null;
+}
+/* GUIDE-END */
+let GTARGET=null, GKEY=null, GRAF=null;
+function guideView(){
+  const live=liveItems();
+  return {on:!!S.guide,seen:S.seen,tab:tab,mk:MKVIEW,cursor:S.cursor,
+    empty:live.length>0&&live.every(k=>(S.inv[k]||0)===0),
+    draws:(LABS&&LABS.draws)||0,declined:S.seen.includes('report_nudge'),
+    weighed:(BODY&&!BODY.error&&BODY.weigh)?(BODY.weigh.entries||0)>0:null,
+    moved:(tab==='markers'&&MKVIEW==='overview'&&MK&&MK!=='none')?!!document.getElementById('since'):null};
+}
+/* after every render: the step for this state, its control on this screen, or nothing */
+function guideSync(){
+  const g=document.getElementById('guide'); if(!g)return;
+  if(!S.init||!S.guide){g.hidden=true;GTARGET=null;GKEY=null;return;}
+  for(let guard=0;guard<8;guard++){
+    const p=guidePlan(guideView());
+    if(!p)break;
+    if(p.done){S.seen.push(p.done);persist();continue;}
+    const el=document.querySelector(p.sel);
+    if(!el){if(p.last){S.seen.push(p.key);persist();continue;}break;}     /* nothing to light here: a step whose control is gone is behind you */
+    if(p.last&&p.arrive&&!S.seen.includes(p.key)){S.seen.push(p.key);persist();}   /* shown once: the light stays for this render */
+    const moved=GKEY!==null&&GKEY!==p.key+p.sel, wasHidden=g.hidden;
+    GTARGET=el;GKEY=p.key+p.sel;
+    document.getElementById('gline').textContent=p.line;
+    g.hidden=false;
+    guidePlace(moved&&!wasHidden);
+    return;
+  }
+  g.hidden=true;GTARGET=null;GKEY=null;
+}
+/* the hole sits around the control; off screen, the layer dims evenly and the line still reads */
+function guidePlace(glide){
+  const hole=document.getElementById('ghole'); if(!hole||!GTARGET)return;
+  const r=GTARGET.getBoundingClientRect(), pad=8, off=r.bottom<0||r.top>window.innerHeight||(r.width===0&&r.height===0);
+  hole.classList.toggle('glide',!!glide);
+  hole.style.left=(off?window.innerWidth/2:r.left-pad)+'px';
+  hole.style.top=(off?(r.bottom<0?-60:window.innerHeight+60):r.top-pad)+'px';
+  hole.style.width=(off?0:r.width+2*pad)+'px';
+  hole.style.height=(off?0:r.height+2*pad)+'px';
+}
+['scroll','resize'].forEach(ev=>window.addEventListener(ev,()=>{if(GTARGET&&!GRAF)GRAF=requestAnimationFrame(()=>{GRAF=null;guidePlace(false);});},{passive:true}));
+
+/* One masthead on every screen: the brand, the meal and cycle count once the app is set up,
+   and two round controls, You and the theme mark. The theme word is the control's label, so
+   the toggle that owns the stored choice is never removed, only drawn as a sun or a moon. */
+function mastHTML(full){
+  const dark=document.documentElement.dataset.theme==='dark';
+  return '<div class="mast-r"><span class="brand">PLATESIDE</span>'+
+    (full?'<span class="folio">MEAL '+(S.cursor+1)+' · CYCLE '+(Math.floor(S.cursor/N)+1)+'</span>':'<span></span>')+
+    '<span class="mast-ctl">'+
+    (full?'<button class="tog" type="button" data-fk="you" onclick="act.you()" aria-label="You: your target, how you eat, your kitchen, your stores and your data"'+(tab==='you'?' aria-current="true"':'')+'>'+icon('you')+'</button>':'')+
+    '<button class="tog" type="button" data-fk="theme" onclick="act.theme()" aria-label="'+(dark?'Dark. Switch to light mode':'Light. Switch to dark mode')+'">'+icon(dark?'moon':'sun')+'</button>'+
+    '</span></div>';
+}
 /* ---- the one render -------------------------------------------------------- */
 function render(){
   if(PRESSED){PRESSED.classList.remove('pressed');PRESSED=null;}
   if(!S.init&&!S.setup){
     document.getElementById('app').innerHTML=viewFirstRun();
     document.getElementById('nav').innerHTML='';
-    document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATESIDE</span><span></span>'+
-      '<button class="tog" type="button" onclick="act.theme()">'+(document.documentElement.dataset.theme==='dark'?'Dark':'Light')+'</button></div>';
-    PAINTED=null;ENTER=null;JUST=null;
+    document.getElementById('mast').innerHTML=mastHTML(false);
+    PAINTED=null;ENTER=null;JUST=null;guideSync();
     return;
   }
   if(!S.init){
@@ -2459,9 +2654,8 @@ function render(){
       '<button class="btn" type="button" data-fk="rst0btn" onclick="act.restore(\'rst0\')">Restore from a backup</button></div>'+
       (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>':'')+'</div>';
     document.getElementById('nav').innerHTML='';
-    document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATESIDE</span><span></span>'+
-      '<button class="tog" type="button" onclick="act.theme()">'+(document.documentElement.dataset.theme==='dark'?'Dark':'Light')+'</button></div>';
-    PAINTED=null;ENTER=null;JUST=null;
+    document.getElementById('mast').innerHTML=mastHTML(false);
+    PAINTED=null;ENTER=null;JUST=null;guideSync();
     return;
   }
 
@@ -2470,15 +2664,13 @@ function render(){
   if(tab==='tonight')h=viewTonight(F);
   else if(tab==='rotation')h=viewRotation(F);
   else if(tab==='kitchen')h=viewKitchen(F);
+  else if(tab==='you')h=viewProfile();
   else h=viewMarkers();
 
   const cur=document.activeElement&&document.activeElement.closest?document.activeElement.closest('[data-fk]'):null;
   const fkey=cur?cur.getAttribute('data-fk'):null;
   document.getElementById('app').innerHTML=h;
-  const dark=document.documentElement.dataset.theme==='dark';
-  document.getElementById('mast').innerHTML='<div class="mast-r"><span class="brand">PLATESIDE</span>'+
-    '<span class="folio">MEAL '+(S.cursor+1)+' · CYCLE '+(Math.floor(S.cursor/N)+1)+'</span>'+
-    '<button class="tog" type="button" data-fk="theme" onclick="act.theme()" aria-label="Switch to '+(dark?'light':'dark')+' mode">'+(dark?'Dark':'Light')+'</button></div>';
+  document.getElementById('mast').innerHTML=mastHTML(true);
   document.getElementById('nav').innerHTML=VIEWS.map(([k,label])=>
     '<button type="button" data-fk="tab:'+k+'" onclick="act.tab(\''+k+'\')"'+
     (tab===k?' aria-current="page"':'')+'>'+gl(k)+label+'</button>').join('');
@@ -2490,6 +2682,7 @@ function render(){
   document.body.dataset.tenure=S.cursor<N?'new':S.cursor<3*N?'learning':'settled';
   PAINTED={cursor:S.cursor,pending:Object.assign({},S.pending),L:Object.assign({},F.L),run:runIn(F).d};
   ENTER=null;JUST=null;
+  guideSync();
 }
 /* the pull toward the next log, in meals — never a date, never a streak */
 function nextGoal(F){
@@ -2505,7 +2698,7 @@ function nextGoal(F){
 /* Press feedback is delegated from the document, so it survives every redraw — and it is the
    only thing that gives the one daily button any feel on iOS, where :active never fires. */
 document.addEventListener('pointerdown',e=>{
-  const t=e.target.closest&&e.target.closest('.btn,.pick,.step2 button,button.card,.tint,.seg button,.row,.strip button,.tile');
+  const t=e.target.closest&&e.target.closest('.btn,.pick,.step2 button,button.card,.tint,.seg button,.row,.strip button,.tile,.mast .tog');
   if(!t)return;
   PRESSED=t;t.classList.add('pressed');
   if(t.classList.contains('btn-primary'))document.body.classList.add('arming');
@@ -2520,7 +2713,7 @@ function loadState(v){
   try{const s=JSON.parse(v);S={inv:{...EMPTY,...(s.inv||{})},cursor:s.cursor||0,checked:s.checked||[],
     order:normOrder(s.order),off:s.off||{},flav:s.flav||[],init:s.init||false,
     pending:(s.pending&&typeof s.pending==='object')?s.pending:{},applied:Array.isArray(s.applied)?s.applied:[],
-    gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],
+    gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],guide:!!s.guide,
     reset_at:s.reset_at||0,setup:!!s.setup||!!s.init,last:(s.last&&typeof s.last==='object'&&Array.isArray(s.last.order))?s.last:null};return true;}catch(e){return false;}
 }
 /* The other device logged a meal or changed stock: take its copy and redraw. */
@@ -2543,6 +2736,6 @@ document.addEventListener('lt:remote',e=>{
   if(back&&S.init){tab=back.tab||tab;MKVIEW=back.mk||MKVIEW;if(back.item&&I[back.item])SED.item=back.item;if(back.store&&STORES[back.store])SED.store=back.store;}
   render();
   /* the Profile view draws once its data arrives, so the render that draws the editor scrolls */
-  if(back&&S.init){SCROLLTO=back.at||null;if(tab==='markers'&&MK===null)loadMarkers();}
+  if(back&&S.init){SCROLLTO=back.at||null;if((tab==='markers'||tab==='you')&&MK===null)loadMarkers();}
 })();
 

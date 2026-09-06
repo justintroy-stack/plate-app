@@ -334,10 +334,10 @@ button.card{width:100%;text-align:left}
 .mk__in .facts{grid-template-columns:96px 1fr}
 .mk__in .btn--ink{width:100%;margin-top:var(--s4)}
 
-/* CHIPS — Markers' own sub-views, in content, one row of pills; the current one is ink */
-.chips{display:flex;gap:var(--s2);overflow-x:auto;padding:12px var(--gutter) 0;scrollbar-width:none;
-  -webkit-overflow-scrolling:touch}
-.chips::-webkit-scrollbar{display:none}
+/* CHIPS — Markers' own sub-views, in content, pills that wrap; the current one is ink. They
+   used to sit in one row that scrolled sideways with no scrollbar, and at phone width the last
+   two were off the right edge with nothing to say so. */
+.chips{display:flex;flex-wrap:wrap;gap:var(--s2);padding:12px var(--gutter) 0}
 .chips button{flex:none;height:36px;padding:0 14px;border-radius:var(--r-pill);background:var(--sunk);color:var(--ink-2);
   font-size:13.5px;font-weight:640;letter-spacing:-.01em;white-space:nowrap;
   transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
@@ -644,19 +644,46 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
    the previous one left 34px of a different surface sitting under the tabs */
 .nav{position:fixed;left:0;right:0;bottom:0;z-index:40;margin:0 auto}
 
-/* the fire fills the viewport, above the page and below nothing */
-#fire{position:fixed;inset:0;z-index:60;pointer-events:none;opacity:0;
-  transition:opacity .5s var(--ez);mix-blend-mode:screen}
-#fire.on{opacity:1}
-#bloomtxt{position:fixed;inset:0;z-index:61;display:none;flex-direction:column;align-items:center;
-  justify-content:center;gap:10px;pointer-events:none;text-align:center;padding:0 34px}
-#bloomtxt.go{display:flex}
-#bloomtxt .big{font-size:clamp(30px,9vw,42px);font-weight:800;font-stretch:118%;letter-spacing:-.03em;
-  color:#FFF7F2;animation:bt 1.4s var(--ez) both;text-shadow:0 2px 30px rgba(0,0,0,.4)}
-#bloomtxt .sm{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;
-  color:rgba(255,247,242,.76);animation:bt 1.4s var(--ez) .1s both}
-@keyframes bt{0%{opacity:0;transform:translateY(20px) scale(.94)}
-  16%{opacity:1;transform:none}70%{opacity:1}100%{opacity:0;transform:translateY(-10px)}}
+/* ---------- THE LEDGER: the log moment. A sheet rises from the bottom edge in ink, above the
+   page and below nothing; the plate drawn on it tilts and sheds what tonight used into the
+   rows below, each count rolling from what was there to what is left, then the next meal. It
+   goes back down on its own or on a tap, and the new plate reads in underneath. */
+#ledger{position:fixed;left:0;right:0;bottom:0;z-index:60;margin:0 auto;max-width:560px;
+  background:var(--ink);color:var(--enamel);border-radius:28px 28px 0 0;box-shadow:0 -12px 40px rgba(18,21,14,.28);
+  transform:translateY(102%);visibility:hidden;transition:transform .34s var(--ez),visibility 0s linear .34s;
+  padding:0 24px calc(env(safe-area-inset-bottom) + 22px);cursor:pointer}
+#ledger.on{transform:none;visibility:visible;transition:transform .42s var(--ez-out)}
+#ledger canvas{display:block;width:100%;height:168px}
+.lrise{animation:lrise .52s var(--ez-out) both}
+@keyframes lrise{from{opacity:0;transform:translateY(14px)}}
+.ledger-eye{font-family:var(--mono);font-size:11px;letter-spacing:.14em;text-transform:uppercase;opacity:.66}
+.ledger-big{font-size:clamp(28px,8vw,36px);line-height:1.02;font-weight:780;letter-spacing:-.03em;margin-top:8px;font-stretch:112%}
+.ledger-how{font-size:14px;opacity:.72;margin-top:6px}
+.ledger-rows{margin-top:14px}
+.ledger-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0}
+.ledger-row+.ledger-row{border-top:1px solid rgba(255,255,255,.12)}
+.ledger-name{display:block;font-size:14.5px;font-weight:600}
+.ledger-meta{display:block;font-size:12px;opacity:.62;margin-top:2px;line-height:1.35}
+.ledger-val{font-family:var(--mono);font-size:18px;font-variant-numeric:tabular-nums;flex:none}
+.ledger-val .u{font-size:11px;opacity:.62;margin-left:4px}
+.ledger-next{margin-top:16px;font-size:14.5px;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.ledger-next b{font-weight:700}
+.ledger-next .i{flex:none;opacity:.7;width:18px;height:18px}
+
+/* ---------- THE GUIDE: a light on the real control. A dim layer with a hole around the one
+   control to touch next, and one line with Skip in a panel above the tabs. The layer takes no
+   taps, so the page stays usable underneath; the hole follows the control as the page scrolls
+   and glides to the next one when the real action fires. Each step once ever, in S.seen. */
+#guide{position:fixed;inset:0;z-index:50;pointer-events:none;overflow:hidden;animation:gfade .38s var(--ez-out) both}
+@keyframes gfade{from{opacity:0}}
+.g-hole{position:absolute;border-radius:var(--r-lg);box-shadow:0 0 0 200vmax rgba(18,21,14,.5)}
+.g-hole.glide{transition:top var(--d-enter) var(--ez-out),left var(--d-enter) var(--ez-out),width var(--d-enter) var(--ez-out),height var(--d-enter) var(--ez-out)}
+.g-panel{position:absolute;left:14px;right:14px;bottom:calc(var(--navh) + env(safe-area-inset-bottom) + 46px);
+  pointer-events:auto;display:flex;align-items:center;gap:10px;padding:12px 12px 12px 16px;
+  background:var(--ink);color:var(--enamel);border-radius:var(--r-lg);box-shadow:var(--lift-2)}
+.g-line{flex:1;text-align:left;font-size:15px;line-height:1.4;font-weight:520;color:var(--enamel);padding:0;min-height:0}
+.g-skip{flex:none;min-height:34px;padding:0 14px;border-radius:var(--r-pill);background:rgba(255,255,255,.14);color:var(--enamel);font-size:13px;font-weight:640}
+@media (min-width:900px){.g-panel{left:0;right:0;width:560px;margin:0 auto}}
 
 .mast{position:fixed;top:0;left:0;right:0;z-index:45;margin:0 auto;color:var(--ink);
   background:color-mix(in srgb,var(--enamel) 86%, transparent);
@@ -665,10 +692,15 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   padding:0 22px;font-family:var(--mono);font-size:11px;letter-spacing:.13em;text-transform:uppercase}
 .mast .brand{font-family:var(--sans);font-weight:800;letter-spacing:.2em;font-size:11.5px}
 .mast .folio{color:var(--ink-3)}
-/* the theme toggle is a sunk pill, the system's button at rest; nothing here has a border */
-.mast .tog{background:var(--sunk);border-radius:var(--r-pill);padding:6px 11px;color:var(--ink-2);
-  font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;
-  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez)}
+/* the two round controls, the theme mark and You: sunk wells, the system's button at rest;
+   nothing here has a border, and the word each carries is its label. You is ink while open. */
+.mast .tog{background:var(--sunk);border-radius:var(--r-pill);width:34px;height:34px;padding:0;color:var(--ink-2);
+  display:grid;place-items:center;-webkit-tap-highlight-color:transparent;
+  transition:background-color var(--d-state) var(--ez),color var(--d-state) var(--ez),transform var(--d-press) var(--ez)}
+.mast .tog .i{width:17px;height:17px;stroke-width:1.5}
+.mast .tog[aria-current="true"]{background:var(--ink);color:var(--enamel)}
+.mast .tog.pressed{transform:scale(.9)}
+.mast-ctl{display:flex;gap:8px;align-items:center;flex:none}
 #app{padding-top:calc(var(--masth) + env(safe-area-inset-top))}
 /* the stepper beside a stock row, and the slot stepper beside a cold row: round wells, the
    system's iconbtn without the lift */
@@ -765,11 +797,20 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   <!-- a marker: the trend line the Markers tab is drawn on, and its chip on the one card
        that is the point of that screen -->
   <symbol id="i-marker" viewBox="0 0 16 16"><path d="M2 12.5L5.6 8L8.2 10.6L13.5 4.5"/><path d="M10.6 4.5H13.5V7.4"/></symbol>
+  <!-- You: the person, head and shoulders. The round control in the masthead that opens
+       your own settings; every screen carries it once the app is set up. -->
+  <symbol id="i-you" viewBox="0 0 16 16"><circle cx="8" cy="5.4" r="2.7"/><path d="M2.8 14.2C3.3 11.1 5.3 9.5 8 9.5S12.7 11.1 13.2 14.2"/></symbol>
+  <!-- light or dark, as the mark on the theme control: the sun for the light theme in play,
+       the moon for dark. The word each stands for is the control's label. -->
+  <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.8V3.4M8 12.6V14.2M1.8 8H3.4M12.6 8H14.2M3.6 3.6L4.7 4.7M11.3 11.3L12.4 12.4M3.6 12.4L4.7 11.3M11.3 4.7L12.4 3.6"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13.4 9.8A5.6 5.6 0 0 1 6.2 2.6A5.6 5.6 0 1 0 13.4 9.8Z"/></symbol>
  </defs>
 </svg>
 
-<canvas id="fire" aria-hidden="true"></canvas>
-<div id="bloomtxt" aria-hidden="true"><div class="big" id="bloomBig"></div><div class="sm" id="bloomSm"></div></div>
+<div id="ledger" aria-hidden="true"></div>
+<div id="guide" hidden><div class="g-hole" id="ghole"></div>
+  <div class="g-panel" role="status" aria-live="polite"><button class="g-line" type="button" id="gline" data-fk="guideline" onclick="act.guideFind()"></button>
+  <button class="g-skip" type="button" data-fk="guideskip" onclick="act.guideSkip()">Skip</button></div></div>
 <header class="mast" id="mast" aria-label="Plateside"></header>
 <main id="app"></main>
 <nav class="nav" id="nav" aria-label="Plateside"></nav>
