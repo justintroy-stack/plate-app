@@ -9,7 +9,7 @@ import { isDigit, lower, orEmpty, pyD, pyInt, strip } from './py.js';
 import { addMonths } from './pydate.js';
 import { pyDate, unpackInts3 } from './pyx.js';
 
-export const COLUMNS = ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done', 'condition'];
+export const COLUMNS = ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done', 'condition', 'protein_limit_g'];
 /* what a fact can be marked as, so the food rules can read it (history.py's CONDITIONS) */
 export const CONDITIONS = ['celiac', 'gout', 'hypertension', 'diabetes', 'kidney'];
 
@@ -19,6 +19,21 @@ export function touches(item, name) {
   return item.affects.some(a => a && (a.toLowerCase() === n || n.includes(a.toLowerCase()) || a.toLowerCase().includes(n)));
 }
 
+function itemOf(r) {
+  return {
+    date: strip(r.date),
+    category: lower(strip(orEmpty(r.category) || 'note')),      // diagnosis | imaging | therapy | monitoring | note
+    item: r.item.trim(),
+    status: lower(strip(orEmpty(r.status) || 'active')),        // active | superseded | resolved | confirm
+    detail: strip(r.detail),
+    affects: orEmpty(r.affects).split(',').join('|').split('|').map(a => a.trim()).filter(a => a),
+    interval_months: isDigit(strip(r.interval_months)) ? pyInt(strip(r.interval_months)) : null,
+    last_done: strip(r.last_done),                              // YYYY-MM-DD for monitoring rows
+    condition: lower(strip(orEmpty(r.condition))),              // one of CONDITIONS, or blank
+    protein_limit_g: strip(r.protein_limit_g) ? parseFloat(strip(r.protein_limit_g)) : null,   // a kidney row only, Phase 14
+  };
+}
+
 /* [{date, category, item, status, detail, affects, interval_months, last_done}, ...] */
 export function loadHistory(home) {
   const out = [];
@@ -26,38 +41,52 @@ export function loadHistory(home) {
   if (text == null) return out;
   for (const r of readRows(text)) {
     if (!strip(r.item)) continue;
-    const iv = strip(r.interval_months);
-    out.push({
-      date: strip(r.date),
-      category: lower(strip(orEmpty(r.category) || 'note')),      // diagnosis | imaging | therapy | monitoring | note
-      item: r.item.trim(),
-      status: lower(strip(orEmpty(r.status) || 'active')),        // active | superseded | resolved | confirm
-      detail: strip(r.detail),
-      affects: orEmpty(r.affects).split(',').join('|').split('|').map(a => a.trim()).filter(a => a),
-      interval_months: isDigit(iv) ? pyInt(iv) : null,
-      last_done: strip(r.last_done),                              // YYYY-MM-DD for monitoring rows
-      condition: lower(strip(orEmpty(r.condition))),              // one of CONDITIONS, or blank
-    });
+    out.push(itemOf(r));
   }
   return out;
 }
 
-/* Append one row, writing the header first when the file is new: DictWriter's '\r\n' records. */
+/* Every row, in file order, blank-item rows dropped -- the same filter loadHistory uses, so a
+   position from the page always lands on the same row here. */
+function rawRows(home) {
+  const text = home.read('config/history.csv');
+  if (text == null) return [];
+  return readRows(text).filter(r => strip(r.item));
+}
+
+/* Every row, rewritten whole with today's columns -- how a file from before a newer column grows
+   it, on the first write after that column lands, whichever kind of write it is. */
+function writeRows(home, rows) {
+  const kept = rows.map(r => { const o = {}; for (const c of COLUMNS) o[c] = r[c] === undefined || r[c] === null ? '' : r[c]; return o; });
+  home.write('config/history.csv', formatDicts(COLUMNS, kept));
+}
+
+/* One more fact, added after every row already on file. */
 export function appendHistory(home, row) {
-  const p = 'config/history.csv';
-  const isNew = !home.exists(p);
+  const rows = rawRows(home);
   const rec = {};
   for (const c of COLUMNS) rec[c] = row[c] === undefined ? '' : row[c];
-  if (!isNew) {
-    /* a file from before the condition column grows it here, every row kept (history.py's append_history) */
-    const head = home.read(p).split(/\r?\n/)[0].split(',').map(h => h.trim());
-    if (!head.includes('condition')) {
-      const kept = readRows(home.read(p)).map(r => { const o = {}; for (const c of COLUMNS) o[c] = r[c] === undefined || r[c] === null ? '' : r[c]; return o; });
-      home.write(p, formatDicts(COLUMNS, kept));
-    }
-  }
-  const text = isNew ? formatDicts(COLUMNS, [rec]) : formatRow(COLUMNS.map(c => rec[c]));
-  home.write(p, (isNew ? '' : home.read(p)) + text);
+  rows.push(rec);
+  writeRows(home, rows);
+}
+
+/* Change one fact in place, addressed by its position among loadHistory's own rows (today a row
+   is edited, never split or reordered, so a position is a stable address). */
+export function updateHistory(home, index, row) {
+  const rows = rawRows(home);
+  if (!(index >= 0 && index < rows.length)) throw new Error('no history row at position ' + index);
+  const rec = {};
+  for (const c of COLUMNS) rec[c] = row[c] === undefined ? '' : row[c];
+  rows[index] = rec;
+  writeRows(home, rows);
+}
+
+/* Take one fact off the file, by the same position updateHistory and the page use. */
+export function removeHistory(home, index) {
+  const rows = rawRows(home);
+  if (!(index >= 0 && index < rows.length)) throw new Error('no history row at position ' + index);
+  rows.splice(index, 1);
+  writeRows(home, rows);
 }
 
 /* [due ISO date or null, text] for a monitoring row with an interval. */

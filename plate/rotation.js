@@ -134,15 +134,18 @@ export function groupNote(cfg) {
 export const PLATE_MIN = 0.5, PLATE_MAX = 1.4;
 
 /* The plate factor that makes a day of the plan, cooked as written, meet a calorie target: the
-   target over the day's estimate at scale 1, to the nearest 0.05, held inside the bounds. `cfg`
-   must be loaded at plate 1. A twin of rotation.plate_for, rounding as Python does. */
+   target over the day's estimate at scale 1, to the nearest 0.05, held inside PLATE_MIN and the
+   ceiling cfg carries (cfg.plate_max: PLATE_MAX on a multi-meal day, higher on a one-meal day,
+   since the whole target then rides on this one plate). `cfg` must be loaded at plate 1. A twin
+   of rotation.plate_for, rounding as Python does. */
 export function plateFor(cfg, kcal) {
   const day = dayEstimate(cfg);
   const base = (has(day, 'kcal') && day.kcal) ? day.kcal : 0;
   if (!base || !kcal) return { plate: 1, day_kcal: base, ratio: null, clamped: false, plate_kcal: base };
   const ratio = Number(kcal) / base;
   const snapped = pyRound(ratio * 20) / 20;
-  let plate = Math.min(PLATE_MAX, Math.max(PLATE_MIN, snapped));
+  const plate_max = has(cfg, 'plate_max') && cfg.plate_max != null ? cfg.plate_max : PLATE_MAX;
+  let plate = Math.min(plate_max, Math.max(PLATE_MIN, snapped));
   plate = pyRound(plate, 2);
   return { plate, day_kcal: base, ratio: pyRound(ratio, 3), clamped: plate !== pyRound(snapped, 2), plate_kcal: pyRound(base * plate) };
 }

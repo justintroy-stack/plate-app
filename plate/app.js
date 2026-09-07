@@ -173,7 +173,7 @@ const notOn=x=>{const cv=(x.excluded||[]).filter(t=>CAVOID.includes(t));
 const PLAN=CFG.plan||null, SWAPS=PLAN?PLAN.swaps:[], SWAP={};SWAPS.forEach(s=>SWAP[s.key]=s);
 const FULL={},EMPTY={};IORDER.forEach(k=>{FULL[k]=I[k].pack;EMPTY[k]=0;});
 
-let S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:[],init:false,pending:{},applied:[],gate0:{},seen:[],setup:false,tally:{}},
+let S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:[],init:false,pending:{},applied:[],gate0:{},seen:[],setup:false,tally:{},extras:[]},
     tab='tonight',partial=false,pOven=false,planB=false;
 /* A landed swap is the loudest thing this app has to say and it happens perhaps twice a year,
    so applyDue() no longer announces it inline: it queues, and the next render decides how to
@@ -351,10 +351,29 @@ function note(k,arg){if(NOTE!==null||S.seen.includes(k))return;S.seen.push(k);NO
    had, because only that has units, calories and protein: the live options of every slot in
    play and a second helping of tonight's plate. Stock leaves exactly, the day counts it, and
    the cursor never moves. A thing the plan never held has no stock here and stays out. */
-function extraOptions(){
-  const m=activeMeal(), out=[{key:'meal',label:'Another helping of '+m.name,kcal:m.kcal,protein_g:m.protein_g,uses:m.uses,slot:''}];
-  SLOTS.forEach(sl=>(liveOpts(sl)||[]).forEach((o,i)=>out.push({key:sl.id+'/'+i,label:o.label,kcal:o.kcal,protein_g:o.protein_g,uses:o.uses,slot:sl.name})));
-  return out;
+/* one preset, not a list: another helping of tonight's whole plate is a single tap that the
+   by-amount rows below cannot reproduce in one step (his call, Phase 14 -- every canned combo
+   this used to also offer is 1-3 items with a known amount, already reachable there, so keeping
+   both was the still-canned feeling he flagged) */
+/* prevDay: opened for the day already logged (from the Last-logged card, Phase 14), so
+   "another helping" means the plate that day actually ate, not tonight's, which by then is a
+   different meal already cooking. A parameter, not a read of the page's own EXTRAAT, so this
+   stays a pure engine-core function the same as every other one here. The snapshot's own
+   meal_id, looked up in the full catalog rather than read off S.order, so a marker's swap
+   landing on that slot in the meantime cannot rename what was actually eaten; mealAt(-1) is
+   only the fallback the Last-logged card itself falls back to, with no snapshot to read. */
+function extraOptions(prevDay){
+  const L=(prevDay&&S.last&&S.last.cursor===S.cursor-1&&S.last.kind!=='extra')?S.last:null;
+  const m=L?(MEALS[L.meal_id]||mealAt(-1)):(prevDay?mealAt(-1):activeMeal());
+  return [{key:'meal',label:'Another helping of '+m.name,kcal:m.kcal,protein_g:m.protein_g,uses:m.uses,slot:''}];
+}
+/* the running total of what was also had, for one cursor: kcal and protein for the items that
+   carry figures, and how many did not (a home whose items carry none counts them in stock, not
+   on the day, and the day line says so rather than pretending they were zero) */
+function extrasTotal(cur){
+  const ex=(S.extras||[]).filter(x=>x.cursor===cur);
+  const priced=ex.filter(x=>x.kcal!=null);
+  return {kcal:priced.reduce((a,x)=>a+x.kcal,0),protein_g:priced.reduce((a,x)=>a+x.protein_g,0),count:ex.length,unpriced:ex.length-priced.length};
 }
 /* ---- "Also had", by amount (his ask, 2026-09-06: "whenever it says 3 eggs, I actually eat 4
    ... I need the ability to add 1 additional egg instead of another 3 eggs"): anything on hand,
@@ -384,7 +403,7 @@ function leavesOut(tags,reg){if(!reg)return[];const ex=new Set(reg.excludes||[])
 const COND_TAGS=['gluten','purine'];   /* what a condition on the history leaves out: never counted against an allow-list plan (plate_config.CONDITION_TAGS) */
 function effFor(reg,avoid){if(!(avoid||[]).length)return reg;const e=Object.assign({},reg||{id:'',name:'',allows:[],excludes:[],note:''});
   e.excludes=[...new Set([...(e.excludes||[]),...avoid])].sort();return e;}
-const CHIP_TAGS=['beef','pork','poultry','fish','shellfish','dairy','egg','beans','grain','potato','fruit','nuts','vegetable','soy'];   /* the food groups a person can leave out: plate_config.FOOD_TAGS */
+const CHIP_TAGS=['beef','pork','poultry','fish','shellfish','dairy','egg','beans','grain','potato','fruit','nuts','vegetable','soy','gluten'];   /* the food groups a person can leave out: plate_config.FOOD_TAGS */
 const COUNT_KEYS=[['red_meat_slots','beef','red_meat'],['fish_slots','fish','fish'],['beans_slots','bean',null]];
 const COUNT_TAG={red_meat_slots:'beef',fish_slots:'fish',beans_slots:'beans'}, CLASSWORD={red_meat:'beef',fish:'fish',beans:'bean'};
 const TARGET_WORD={fiber_g:'fiber',sat_fat_g:'saturated fat',added_sugar_g:'added sugar'};
@@ -402,6 +421,8 @@ function planGaps(reg,avoid){const e=effFor(reg,avoid),out=[],fit=planFit(reg,av
 /* ENGINE-CORE-END */
 let EXTRA=false;                        /* the Also had picker is open */
 let XAMT={};                            /* the amounts set on the Also had picker's by-amount rows, until they are logged or the picker closes */
+let EXTRAAT=null;                       /* which cursor what gets logged counts against: the day still on Tonight, or the one just finished */
+let EXTRAOCC=null;                      /* which of today's occasions it was beside, on a home with more than one */
 let TRIP={};                            /* a trip being planned, per store: the meals it covers */
 
 window.act={
@@ -659,7 +680,7 @@ window.act={
  async saveRegimen(){const v=RSEL==null?(REG?REG.id:''):RSEL, av=ticked('rg-avoid-',CHIP_TAGS).join('|');
    try{await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'regimen',value:v})});
      if(av!==AVOID_OWN.join('|'))await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'avoid',value:av})});
-     returnTo({at:'regimen'});say('Saved. Rebuilding the rotation.');setTimeout(()=>location.reload(),350);}
+     returnTo({at:'regimen'});say('Saved. Dinners change as what\'s already in your kitchen for them runs out — see Rotation for the order.');setTimeout(()=>location.reload(),350);}
    catch(e){RMSG=e.message;render();}},
  sed(k,v){SED[k]=v;},
  snew(k,v){SNEW[k]=v;},
@@ -697,10 +718,22 @@ window.act={
  async addHist(){
    const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
    const obj={item:g('hItem'),category:g('hCat'),status:g('hStatus'),date:g('hDate'),affects:g('hAff'),
-     interval_months:g('hInt'),last_done:g('hLast'),detail:g('hDetail'),condition:g('hCond')};
+     interval_months:g('hInt'),last_done:g('hLast'),detail:g('hDetail'),condition:g('hCond'),protein_limit_g:g('hCond')==='kidney'?g('hLimit'):''};
    if(!obj.item){MSG='Give the fact a name.';render();return;}
+   if(HEDIT!=null)obj.index=HEDIT;
    try{await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});
-     HIST=null;DRAW=null;MSG='';say('Added.');}
+     HIST=null;DRAW=null;MSG='';const was=HEDIT!=null;HEDIT=null;say(was?'Saved.':'Added.');}
+   catch(e){MSG=e.message;}
+   render();},
+ /* reopens Add a fact pre-filled, saving as a change to this row instead of a new one -- the
+    same shape storeEdit already gives a store under Kitchen */
+ editHist(i){HEDIT=i;HDEL=null;MSG='';SCROLLTO='hist-form';render();},
+ cancelHistEdit(){HEDIT=null;MSG='';render();},
+ askRemoveHist(i){HDEL=i;render();},
+ cancelRemoveHist(){HDEL=null;render();},
+ async removeHist(i){
+   try{await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,remove:true})});
+     HIST=null;DRAW=null;HDEL=null;if(HEDIT===i)HEDIT=null;say('Removed.');}
    catch(e){MSG=e.message;}
    render();},
  cycle(id){S.off[id]=(S.off[id]||0)+1;persist();render();},
@@ -716,22 +749,30 @@ window.act={
     row, so a card appended under the buttons is below the fold, and a render alone changes
     nothing in the viewport (found on his phone, 2026-09-06: the tap "did nothing") */
  openPartial(){partial=true;pOven=false;EXTRA=false;SCROLLTO='partial-card';render();},
- openExtra(){EXTRA=true;XAMT={};partial=false;SCROLLTO='extra-card';render();say('Pick what you also had.');},
- closeExtra(){EXTRA=false;XAMT={};render();},
+ /* opened from Tonight, it counts against the day still ahead; opened from Last logged (his
+    ask: Ate it all should not end the chance to add one more thing), it counts against the day
+    that just closed instead. Either way it is still today in the app's own words, never a
+    clock. */
+ openExtra(prevDay){EXTRA=true;XAMT={};partial=false;EXTRAAT=prevDay?S.cursor-1:S.cursor;
+   EXTRAOCC=OCC.length>1?ROT:null;SCROLLTO='extra-card';render();say('Pick what you also had.');},
+ closeExtra(){EXTRA=false;XAMT={};EXTRAAT=null;EXTRAOCC=null;render();},
+ extraOcc(id){EXTRAOCC=id;render();},
  /* something from stock outside the plan: its own row in the log on no cursor, and the one undo
     until the next log. The stamp is made here so the undo can name the row it takes out. A
     canned option and an amount set by hand take the one path, so the row, the undo, the stock
     and the status line cannot differ. */
- extra(key){const o=extraOptions().find(x=>x.key===key);if(!o)return;window.act.logExtra(o);},
+ extra(key){const o=extraOptions(EXTRAAT===S.cursor-1).find(x=>x.key===key);if(!o)return;window.act.logExtra(o);},
  extraAmt(k,d){if(!I[k])return;const cur=XAMT[k]||0,nx=Math.max(0,Math.min(S.inv[k]||0,Math.round((cur+d*stepOf(k))*100)/100));
    if(nx>0)XAMT[k]=nx;else delete XAMT[k];render();},
  extraLog(){const o=extraFrom(XAMT);if(!o)return;window.act.logExtra(o);},
  logExtra(o){
-   const at=new Date().toISOString();
-   S.last={inv:Object.assign({},S.inv),cursor:S.cursor,checked:S.checked.slice(),order:S.order.slice(),pending:Object.assign({},S.pending),
-     gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',at:at};
-   if(window.plateEvent)window.plateEvent({cursor:S.cursor,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, beside meal '+(S.cursor+1),at:at});
-   deduct(o.uses);EXTRA=false;XAMT={};persist();render();say('Also had '+o.label+'. Stock updated.');},
+   const at=new Date().toISOString(), cur=EXTRAAT==null?S.cursor:EXTRAAT, occ=EXTRAOCC||ROT, occWord=occName(occ).toLowerCase();
+   S.last={inv:Object.assign({},S.inv),cursor:cur,checked:S.checked.slice(),order:S.order.slice(),pending:Object.assign({},S.pending),
+     gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',occasion:occ,at:at};
+   S.extras=(S.extras||[]).filter(x=>x.cursor>=cur-1);
+   S.extras.push({cursor:cur,kcal:o.kcal,protein_g:o.protein_g});
+   if(window.plateEvent)window.plateEvent({cursor:cur,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, with '+occWord,at:at});
+   deduct(o.uses);EXTRA=false;XAMT={};EXTRAAT=null;EXTRAOCC=null;persist();render();say('Also had '+o.label+', with '+occWord+'. Stock updated.');},
  /* the amount of one item tonight's plate takes: stepped in the item's own step, never below
     nothing, kept until the log that takes it */
  used(k,d){const m=activeMeal();if(USED.cursor!==S.cursor||USED.meal!==m.id)USED={cursor:S.cursor,meal:m.id,amt:{}};
@@ -754,8 +795,11 @@ window.act={
  undoLog(){let L=S.last;
    if(L&&L.cooked&&L.meal_id&&S.tally&&S.tally[L.meal_id]>0){S.tally[L.meal_id]--;if(!S.tally[L.meal_id])delete S.tally[L.meal_id];}
    if(L&&L.kind==='extra'){
-     /* an extra put back: the stock it took, and its row on the Mac; the cursor never moved */
+     /* an extra put back: the stock it took, and its row on the Mac; the cursor never moved.
+        The one just logged is always the last entry the running total holds, since nothing
+        else ever adds to it and undo never reaches past the single most recent action. */
      S.inv=Object.assign({},L.inv);S.pending=Object.assign({},L.pending);S.gate0=Object.assign({},L.gate0);S.applied=L.applied.slice();S.order=L.order.slice();
+     if(S.extras&&S.extras.length)S.extras.pop();
      S.last=null;
      if(window.plateEvent)window.plateEvent({cursor:L.cursor,meal_id:'extra',meal:L.meal,kind:'undo_extra',note:'undone by the user',at:L.at});
      persist();render();say('Undone. '+L.meal+' is back in stock.');return;}
@@ -821,7 +865,7 @@ window.act={
  notNow(){if(!S.seen.includes('report_nudge'))S.seen.push('report_nudge');persist();render();},
  closeFlip(){const g=document.getElementById('gate');g.innerHTML='';},
  reset(){S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:S.flav,init:false,pending:{},applied:[],
-   gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true,tally:{}};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
+   gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true,tally:{},extras:[]};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
 };
 
 /* What the log just did, said in the units the system owns: meals and cycles, never dates. */
@@ -1404,8 +1448,10 @@ function viewOverview(){
       .filter(k=>k in d.targets&&!(COUNT_TAG[k]&&!d.targets[k]&&leavesOut([COUNT_TAG[k]],REG).length));   /* a count of nothing the plan has no food for is not a target */
     aside+='<section class="card card--tint" data-family="sprout"><span class="t-label">Your food targets now</span><div class="rows">';
     keys.forEach(k=>{const b=d.baseline[k],t=d.targets[k],changed=t!==b;
+      const kc=k==='protein_g'?(d.conditions||[]).find(c=>c.id==='kidney'&&c.protein_limit_g):null;
       aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(tlabel(k))+'</span>'+
-        '<span class="row__meta">'+(changed?'was '+esc(b)+esc(tunit(k))+', moved by '+esc(movedBy(d,k)):'as your plan was built')+'</span></span>'+
+        '<span class="row__meta">'+(changed?'was '+esc(b)+esc(tunit(k))+', moved by '+esc(movedBy(d,k)):'as your plan was built')+
+        (kc?' · your kidney limit on file: '+esc(fmt(kc.protein_limit_g))+' g':'')+'</span></span>'+
         '<b class="row__val">'+esc(t)+esc(tunit(k))+'</b></div>';});
     const conds=(d.conditions||[]).length?'<p class="t-note" style="margin-top:var(--s2)">'+esc(d.conditions.map(condLine).join(' '))+'</p>':'';
     const unheld=(d.unheld||[]).length?'<p class="t-note" style="margin-top:var(--s2)">'+esc(list(d.unheld.map(k=>TARGET_WORD[k]||k)).replace(/^\w/,c=>c.toUpperCase()))+(d.unheld.length>1?' are not targets':' is not a target')+' on '+esc(Plan())+': its plates are built without '+(d.unheld.length>1?'them':'it')+'.</p>':'';
@@ -1487,10 +1533,22 @@ function takeOutRows(m){
 function dayLine(m){
   const cold=coldAt(0), others=OCC.filter(o=>o.id!==ROT).map(o=>o.id);
   let kc=m.kcal, pr=m.protein_g;cold.forEach(c=>{kc+=c.kcal;pr+=c.protein_g;});
+  const ex=extrasTotal(S.cursor);kc+=ex.kcal;pr+=ex.protein_g;
   const dt=(PLAN&&PLAN.day_targets)||{}, tgt=dt.kcal?', against your '+Math.round(dt.kcal).toLocaleString()+' a day':'';
+  const also=ex.count?' Also had so far today: '+(ex.kcal||ex.protein_g?'about '+ex.kcal.toLocaleString()+' kcal and '+ex.protein_g+' g protein, counted in above':'not priced, counted in stock and not on the day')+
+    (ex.unpriced&&(ex.kcal||ex.protein_g)?' (except '+ex.unpriced+' item'+(ex.unpriced===1?'':'s')+' this home carries no figures for)':'')+'.':'';
+  const kc2=CONDS.find(c=>c.id==='kidney'&&c.protein_limit_g), klim=kc2?' Your kidney limit on file: '+fmt(kc2.protein_limit_g)+' g.':'';
   const sum='about '+kc.toLocaleString()+' kcal and '+pr+' g protein';
-  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', cold block included: ':': ')+sum+tgt+'.';
-  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+tgt+'.';
+  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', cold block included: ':': ')+sum+tgt+'.'+also+klim;
+  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+tgt+'.'+also+klim;
+}
+/* the same running total, for a day already logged: the Last-logged card names every extra
+   added since, not just the most recent one xRow shows */
+function logDayLine(cur){
+  const ex=extrasTotal(cur);
+  if(!ex.count)return '';
+  return 'Also had today: '+(ex.kcal||ex.protein_g?'about '+ex.kcal.toLocaleString()+' kcal and '+ex.protein_g+' g protein':'not priced, counted in stock and not on the day')+
+    (ex.unpriced&&(ex.kcal||ex.protein_g)?' (except '+ex.unpriced+' item'+(ex.unpriced===1?'':'s')+' this home carries no figures for)':'')+'.';
 }
 const statBox=(label,num,unit)=>'<div class="stat"><span class="t-label">'+esc(label)+'</span><span class="numrow"><b class="num num--md">'+num+'</b>'+
   (unit?'<span class="t-unit">'+esc(unit)+'</span>':'')+'</span></div>';
@@ -1517,24 +1575,32 @@ function viewTonight(F){
   top+=noteCard();
   top+=reportCard();
   if(CFG.plate_step)top+=plateCard(CFG.plate_step);
-  const X=(S.last&&S.last.kind==='extra'&&S.last.cursor===S.cursor)?S.last:null;
-  if(X){
-    /* the last log was something outside the plan: the one undo until the next log */
-    top+='<section class="card" style="padding:0 var(--s5) var(--s2)"><div class="rows"><div class="row">'+
-      '<span class="row__body"><span class="row__title">Also had: '+esc(X.meal)+'</span>'+
-      '<span class="row__meta">outside the plan · the rotation did not move</span></span>'+
-      '<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button></div></div></section>';
+  /* the last log was something outside the plan, still today whether Tonight has been cooked
+     yet or not (his ask, Phase 14: Ate it all should not end the chance to add one more thing) */
+  const X=(S.last&&S.last.kind==='extra'&&(S.last.cursor===S.cursor||S.last.cursor===S.cursor-1))?S.last:null;
+  const xRow=x=>'<div class="row"><span class="row__body"><span class="row__title">Also had: '+esc(x.meal)+
+    (x.occasion?', with '+esc(occName(x.occasion).toLowerCase()):'')+'</span>'+
+    '<span class="row__meta">outside the plan · the rotation did not move</span></span>'+
+    '<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button></div>';
+  if(X&&X.cursor===S.cursor&&S.cursor===0){
+    /* nothing has ever been cooked yet: the one row there is to show */
+    top+='<section class="card" style="padding:0 var(--s5) var(--s2)"><div class="rows">'+xRow(X)+'</div></section>';
   } else if(S.cursor>0){
     /* the last log, and the one way back. No clock on it: the meal log on the Mac keeps the
        real stamp, because that is the record, and this screen is the planner. With no snapshot
        (a log from before undo existed, or a second undo) the kind is a guess, so it says
-       "assumed"; the undo itself says it put the stock back as if the whole plate was eaten. */
-    const L=(S.last&&S.last.cursor===S.cursor-1)?S.last:null, pm=L?L:{meal:mealAt(-1).name,kind:'full'};
+       "assumed"; the undo itself says it put the stock back as if the whole plate was eaten.
+       Undo only ever undoes the single most recent thing, so it sits on whichever row that is:
+       the extra when one was logged since, the meal itself otherwise. */
+    const L=(S.last&&S.last.cursor===S.cursor-1&&S.last.kind!=='extra')?S.last:null, pm=L?L:{meal:mealAt(-1).name,kind:'full'};
     const how=pm.kind==='partial'?'In part':pm.kind==='plan_b'?'As Plan B':'Ate it all';
     top+='<section class="card" style="padding:0 var(--s5) var(--s2)"><div class="rows"><div class="row">'+
       '<span class="row__body"><span class="row__title">Last logged: '+esc(pm.meal)+'</span>'+
       '<span class="row__meta">'+how+(L?'':' · assumed')+'</span></span>'+
-      '<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button></div></div></section>';
+      (X?'':'<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button>')+'</div>'+
+      (X&&X.cursor===S.cursor-1?xRow(X):'')+'</div>'+
+      (extrasTotal(S.cursor-1).count?'<p class="t-note" style="margin:var(--s2) var(--s5) 0">'+esc(logDayLine(S.cursor-1))+'</p>':'')+
+      '<div class="btnrow" style="margin:var(--s3) var(--s5) 0"><button class="btn" type="button" data-fk="extraprev" onclick="act.openExtra(true)">Also had something from stock</button></div></section>';
   }
 
   /* the two ways into the Kitchen, each the engine's own number and the same one the Kitchen
@@ -1599,12 +1665,13 @@ function viewTonight(F){
       (planB?'<button class="btn" data-fk="planb" onclick="act.planB(false)">Back to the planned meal</button>':'')+
       '</div><p class="t-note" style="margin-top:var(--s3)">'+esc(nextGoal(F))+'</p>'+
       '<p class="t-note" style="margin-top:var(--s2)">Ate out? Nothing to log. Tonight\'s plate waits, and a night not logged costs nothing.</p></section>';
-    if(EXTRA){const xo=extraFrom(XAMT), xs=extraItems();
+    if(EXTRA){const xo=extraFrom(XAMT), xs=extraItems(), one=extraOptions(EXTRAAT===S.cursor-1)[0];
       aside+='<section class="card" id="extra-card" data-family="sprout"><span class="t-label">Also had</span>'+
-      '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move.</p><div class="rows">'+
-      extraOptions().map(o=>'<button class="row" type="button" data-fk="extra:'+esc(o.key)+'" onclick="act.extra(\''+esc(o.key)+'\')"><span class="row__body"><span class="row__title">'+esc(o.label)+'</span>'+
-        '<span class="row__meta">'+(o.slot?esc(o.slot)+' · ':'')+Number(o.kcal).toLocaleString()+' kcal · '+o.protein_g+' g protein</span></span>'+icon('arrow')+'</button>').join('')+
-      '</div>'+
+      '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">Something from your stock, outside the plan. It leaves your stock and counts on the day; the rotation does not move.</p>'+
+      (OCC.length>1?'<div class="seg" role="radiogroup" aria-label="With which meal" style="margin:var(--s2) 0">'+
+        OCC.map(o=>'<button type="button" role="radio" data-fk="extraocc:'+o.id+'" aria-checked="'+(EXTRAOCC===o.id)+'" onclick="act.extraOcc(\''+o.id+'\')">'+esc(occName(o.id))+'</button>').join('')+'</div>':'')+
+      '<button class="row" type="button" data-fk="extra:'+esc(one.key)+'" onclick="act.extra(\''+esc(one.key)+'\')"><span class="row__body"><span class="row__title">'+esc(one.label)+'</span>'+
+        '<span class="row__meta">'+Number(one.kcal).toLocaleString()+' kcal · '+one.protein_g+' g protein</span></span>'+icon('arrow')+'</button>'+
       /* by amount: a row per item on hand, a stepper in the item's own step, one log for what
          was set (his ask: one more egg is one egg, not another three) */
       '<span class="t-label" style="display:block;margin-top:var(--s5)">Or by amount</span>'+
@@ -1662,6 +1729,9 @@ function nowCard(F){
     title:'Add a lab report',meta:esc(reportLine('now'))});
   if(CFG.plate_step)rows.push({ico:'check',fam:'sprout',fk:'now:plate',go:"act.jumpK('platecard')",
     title:'The scale stepped the plate',meta:'Read what changed. Undo if you want it back.'});
+  const swapsLive=SWAPS.filter(s=>S.order.includes(s.from)&&S.pending[s.key]!=null);
+  if(swapsLive.length)rows.push({ico:'sprout',fam:'sprout',fk:'now:swap',go:"act.tab('rotation')",
+    title:swapsLive.length+' dinner'+(swapsLive.length===1?'':'s')+' lined up to change',meta:gateLine()});
   let h='<section class="card" id="now" aria-label="What to do now"><div class="split"><span class="t-label">Now</span>'+
     '<span class="mono" style="color:var(--ink-3)">'+(rows.length?rows.length+' thing'+(rows.length===1?'':'s')+' due':'in order')+'</span></div>';
   if(!rows.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">Nothing due but dinner.</p></section>';
@@ -1683,7 +1753,7 @@ const PROTWORD={red_meat:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellf
 const famOf=m=>PROTFAM[m.protein_class]||'sprout';
 /* The food-group note under the rotation: one group that lands three or more times on a night
    whatever the cold block draws. The engine counts it in both twins; the page only says it. */
-const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings',gluten:'gluten',purine:'purine-rich food'};
+const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',gluten:'gluten',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings',purine:'purine-rich food',vegetarian:'a plant-only dinner',vegan:'a vegan dinner'};
 const tagWords=ts=>list((ts||[]).map(t=>TAGWORD[t]||t));
 const NUMWORD=['no','one','two','three','four','five','six','seven','eight','nine'];
 function groupLine(g){
@@ -1887,12 +1957,33 @@ function viewKitchen(F){
   const noreg=NOREG.filter(k=>MEALS[k]&&S.order.includes(k));
   const nocold=NOCOLD.filter(c=>{const sl=SLOTS.find(s=>s.id===c.slot);const o=sl&&sl.opts.find(x=>x.label===c.label);
     return !!o&&(o.excluded_items||[]).some(k=>(S.inv[k]||0)>0);});
-  const byHist=CAVOID.length&&noreg.every(k=>(MEALS[k].excluded||[]).every(t=>CAVOID.includes(t)))&&nocold.every(c=>{const sl=SLOTS.find(s=>s.id===c.slot);const o=sl&&sl.opts.find(x=>x.label===c.label);return !!o&&(o.excluded||[]).every(t=>CAVOID.includes(t));});
-  if((REG||AVOID.length)&&(noreg.length||nocold.length))hero+='<section class="card card--tint" data-family="ember"><span class="t-label">'+(byHist?'Left out by your history':REG?'Not on the '+esc(planName())+' plan':'What you leave out')+'</span>'+
-    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(noreg.length?esc(noreg.map(k=>MEALS[k].name+' (has '+tagWords(MEALS[k].excluded)+')').join(', '))+'. ':'')+
-    (nocold.length?'From the cold block: '+esc(nocold.map(c=>c.label).join(', '))+'. ':'')+
+  /* every excluded meal or cold option, with the tags that excluded it, split by whether that
+     reason is entirely a condition's (his history) or touches the plan or a chip too -- a plan
+     can now leave things out for its own reason (Everything and vegetarian dinners, Phase 14)
+     at the same time a condition leaves out others, so the two are never assumed uniform */
+  const histItems=[...noreg.map(k=>({name:MEALS[k].name,tags:MEALS[k].excluded})),
+    ...nocold.map(c=>{const sl=SLOTS.find(s=>s.id===c.slot),o=sl&&sl.opts.find(x=>x.label===c.label);return {name:c.label,tags:(o&&o.excluded)||[]};})];
+  const byCond=it=>CAVOID.length&&it.tags.length&&it.tags.every(t=>CAVOID.includes(t));
+  const condItems=histItems.filter(byCond), planItems=histItems.filter(it=>!byCond(it));
+  if(condItems.length){
+    /* one line per condition, its items listed once, rather than repeating the same reason on
+       every row -- long and repetitive on a home with several excluded items for the one fact */
+    const lines=CONDS.filter(c=>condItems.some(it=>(c.tags||[]).some(t=>it.tags.includes(t))))
+      .map(c=>c.word.replace(/^\w/,ch=>ch.toUpperCase())+' leaves out '+tagWords(c.tags)+': '+
+        list(condItems.filter(it=>(c.tags||[]).some(t=>it.tags.includes(t))).map(it=>it.name))+'.');
+    hero+='<section class="card card--tint" data-family="ember"><span class="t-label">Left out by your history</span>'+
+      '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+esc(lines.join(' '))+
+      ' Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while it stays left out.</p>'+
+      '<button class="btn btn--sm btn--quiet" type="button" data-fk="gohist" onclick="act.you(\'hist-form\')">See your history '+icon('arrow')+'</button></section>';
+  }
+  if((REG||AVOID.length)&&planItems.length){
+    const planReg=planItems.filter(it=>noreg.some(k=>MEALS[k].name===it.name)), planCold=planItems.filter(it=>!planReg.includes(it));
+    hero+='<section class="card card--tint" data-family="ember"><span class="t-label">'+(REG?'Not on the '+esc(planName())+' plan':'What you leave out')+'</span>'+
+    '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(planReg.length?esc(planReg.map(it=>it.name+' (has '+tagWords(it.tags)+')').join(', '))+'. ':'')+
+    (planCold.length?'From the cold block: '+esc(planCold.map(it=>it.name).join(', '))+'. ':'')+
     'Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while it stays left out.</p>'+
     '<button class="btn btn--sm btn--quiet" type="button" data-fk="goplan" style="margin-top:var(--s2);padding-left:0" onclick="act.you(\'regimen\')">Change how you eat '+icon('arrow')+'</button></section>';
+  }
 
   /* what to buy, one card per store */
   let main='';
@@ -2751,6 +2842,8 @@ function frSync(){
 let SPICK=null,SMSG='';                 /* the picker's unsaved choice: {shop:[...], picks:{}} */
 let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cadence:'',countdown:false,kind:'grocery',msg:''};
 let SEDIT={key:'',name:'',kind:'grocery',threshold:'',cadence:'',msg:''};   /* a store being changed under Stores, by key */   /* the editor's typed values, kept across a redraw */
+let HEDIT=null;                         /* a history row being changed, by position -- reopens Add a fact pre-filled */
+let HDEL=null;                          /* a history row asking to be removed, by position, until confirmed or backed out of */
 /* A save fetches the page again, because the catalog is resolved on the Mac and rides inside
    it; this remembers where he was so the reload lands him back on the editor. */
 function returnTo(extra){try{sessionStorage.setItem('lt:return',JSON.stringify(Object.assign({tab:'you',mk:'overview',at:'sed'},extra||{})));}catch(e){}}
@@ -2924,22 +3017,35 @@ function viewProfile(){
   let aside=viewAppearance()+guide+data+lens;
   aside+='<section class="card" data-family="plum"><div class="split"><span class="t-label">Health history</span><span class="mono" style="color:var(--ink-3)">'+(h0.items||[]).length+' facts</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them. A fact marked as a condition pulls one lever the food rules already have, and the row says which.</p><div class="rows">';
-  (h0.items||[]).forEach(x=>{aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
+  (h0.items||[]).forEach((x,i)=>{
+    const lever=x.condition?(x.condition==='kidney'&&x.protein_limit_g?'a kidney condition: your limit on file, '+fmt(x.protein_limit_g)+' g':esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||'')):'';
+    aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
     ((x.affects||[]).length?' · touches '+esc(x.affects.join(', ')):'')+(x.interval_months?' · every '+x.interval_months+' mo':'')+(x.last_done?', last '+esc(x.last_done):'')+
-    (x.condition?' · '+esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||''):'')+'</span>'+
-    (x.detail?'<span class="row__note">'+esc(x.detail)+'</span>':'')+'</span></div>';});
+    (lever?' · '+lever:'')+'</span>'+
+    (x.detail?'<span class="row__note">'+esc(x.detail)+'</span>':'')+'</span>'+
+    (HDEL===i?'<span class="btnrow"><button class="btn btn--sm" type="button" data-fk="histdelno" onclick="act.cancelRemoveHist()">Cancel</button>'+
+      '<button class="btn btn--sm btn--ink" type="button" data-fk="histdelyes" onclick="act.removeHist('+i+')">Remove it</button></span>'
+     :'<span class="btnrow"><button class="btn btn--sm" type="button" data-fk="histedit:'+i+'" onclick="act.editHist('+i+')">Edit</button>'+
+      '<button class="btn btn--sm" type="button" data-fk="histdel:'+i+'" onclick="act.askRemoveHist('+i+')">Remove</button></span>')+
+    '</div>';});
   aside+='</div></section>';
-  aside+='<section class="card"><span class="t-label">Add a fact</span><div class="formgrid" style="margin-top:var(--s3)">'+
-    '<div class="field wide"><span>Item</span><input id="hItem" data-fk="hitem" placeholder="e.g. Imaging: echocardiogram finding"></div>'+
-    '<div class="field"><span>Category</span><select id="hCat" data-fk="hcat"><option>diagnosis</option><option>imaging</option><option>therapy</option><option>monitoring</option><option>note</option></select></div>'+
-    '<div class="field"><span>Status</span><select id="hStatus" data-fk="hstatus"><option>active</option><option>resolved</option><option>superseded</option><option>confirm</option></select></div>'+
-    '<div class="field"><span>Date, free text</span><input id="hDate" data-fk="hdate" placeholder="2026-02 or ~2024"></div>'+
-    '<div class="field"><span>Touches, pipe separated</span><input id="hAff" data-fk="haff" placeholder="Lipid panel|ApoB"></div>'+
-    '<div class="field"><span>Repeat every, months</span><input id="hInt" data-fk="hint" type="number" min="1"></div>'+
-    '<div class="field"><span>Last done</span><input id="hLast" data-fk="hlast" placeholder="2026-02-01"></div>'+
-    '<div class="field wide"><span>Detail</span><input id="hDetail" data-fk="hdetail"></div>'+
-    '<div class="field wide"><span>Marks it as</span><select id="hCond" data-fk="hcond"><option value="">nothing the food rules read</option>'+HCOND.map(([id,w])=>'<option value="'+id+'">'+esc(w)+' · '+esc(HLEVER[id])+'</option>').join('')+'</select></div>'+
-    '<div class="field"><span>&nbsp;</span><button class="btn btn--ink" type="button" data-fk="hadd" onclick="act.addHist()">Add</button></div></div>'+
+  const hEd=HEDIT!=null?(h0.items||[])[HEDIT]:null;
+  const hSel=(id,v)=>(hEd&&hEd[id]===v)?' selected':'';
+  aside+='<section class="card" id="hist-form"><span class="t-label">'+(hEd?'Edit a fact':'Add a fact')+'</span><div class="formgrid" style="margin-top:var(--s3)">'+
+    '<div class="field wide"><span>Item</span><input id="hItem" data-fk="hitem" placeholder="e.g. Imaging: echocardiogram finding" value="'+esc(hEd?hEd.item:'')+'"></div>'+
+    '<div class="field"><span>Category</span><select id="hCat" data-fk="hcat"><option'+hSel('category','diagnosis')+'>diagnosis</option><option'+hSel('category','imaging')+'>imaging</option><option'+hSel('category','therapy')+'>therapy</option><option'+hSel('category','monitoring')+'>monitoring</option><option'+hSel('category','note')+'>note</option></select></div>'+
+    '<div class="field"><span>Status</span><select id="hStatus" data-fk="hstatus"><option'+hSel('status','active')+'>active</option><option'+hSel('status','resolved')+'>resolved</option><option'+hSel('status','superseded')+'>superseded</option><option'+hSel('status','confirm')+'>confirm</option></select></div>'+
+    '<div class="field"><span>Date, free text</span><input id="hDate" data-fk="hdate" placeholder="2026-02 or ~2024" value="'+esc(hEd?hEd.date:'')+'"></div>'+
+    '<div class="field"><span>Touches, pipe separated</span><input id="hAff" data-fk="haff" placeholder="Lipid panel|ApoB" value="'+esc(hEd?(hEd.affects||[]).join('|'):'')+'"></div>'+
+    '<div class="field"><span>Repeat every, months</span><input id="hInt" data-fk="hint" type="number" min="1" value="'+esc(hEd&&hEd.interval_months?hEd.interval_months:'')+'"></div>'+
+    '<div class="field"><span>Last done</span><input id="hLast" data-fk="hlast" placeholder="2026-02-01" value="'+esc(hEd?hEd.last_done:'')+'"></div>'+
+    '<div class="field wide"><span>Detail</span><input id="hDetail" data-fk="hdetail" value="'+esc(hEd?hEd.detail:'')+'"></div>'+
+    '<div class="field wide"><span>Marks it as</span><select id="hCond" data-fk="hcond"><option value=""'+((!hEd||!hEd.condition)?' selected':'')+'>nothing the food rules read</option>'+HCOND.map(([id,w])=>'<option value="'+id+'"'+hSel('condition',id)+'>'+esc(w)+' · '+esc(HLEVER[id])+'</option>').join('')+'</select></div>'+
+    '<div class="field wide"><span>Kidney protein limit, if your doctor gave you one, g per day (kidney only)</span><input id="hLimit" data-fk="hlimit" type="number" min="1" placeholder="e.g. 60" value="'+esc(hEd&&hEd.protein_limit_g?fmt(hEd.protein_limit_g):'')+'"></div>'+
+    '<div class="field"><span>&nbsp;</span><div class="btnrow">'+
+    '<button class="btn btn--ink" type="button" data-fk="hadd" onclick="act.addHist()">'+(hEd?'Save':'Add')+'</button>'+
+    (hEd?'<button class="btn" type="button" data-fk="hcancel" onclick="act.cancelHistEdit()">Cancel</button>':'')+
+    '</div></div></div>'+
     (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
   aside+=storyCard();
   return '<div class="stack stack--top"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
@@ -3216,7 +3322,8 @@ function loadState(v){
     pending:(s.pending&&typeof s.pending==='object')?s.pending:{},applied:Array.isArray(s.applied)?s.applied:[],
     gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],guide:!!s.guide,tour:!!s.tour,
     tally:(s.tally&&typeof s.tally==='object')?s.tally:null,
-    reset_at:s.reset_at||0,setup:!!s.setup||!!s.init,last:(s.last&&typeof s.last==='object'&&Array.isArray(s.last.order))?s.last:null};return true;}catch(e){return false;}
+    reset_at:s.reset_at||0,setup:!!s.setup||!!s.init,last:(s.last&&typeof s.last==='object'&&Array.isArray(s.last.order))?s.last:null,
+    extras:Array.isArray(s.extras)?s.extras:[]};return true;}catch(e){return false;}
 }
 /* The other device logged a meal or changed stock: take its copy and redraw. */
 document.addEventListener('lt:remote',e=>{

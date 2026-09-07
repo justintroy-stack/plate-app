@@ -10,7 +10,7 @@
 import { readRows, formatDicts } from './csv.js';
 import { ConfigError, PyValueError, pyFloat, pyRound, pyReprStr, pySorted, stampLocal, strip } from './py.js';
 import { daysBetween, parseIso, addDays } from './pydate.js';
-import { numstr, plateFromDiet, setDiet, PLATE_MIN, PLATE_MAX, PLATE_STEP } from './plate_config.js';
+import { numstr, occasionsFromDiet, plateCeiling, plateFromDiet, setDiet, PLATE_MIN, PLATE_MAX, PLATE_STEP } from './plate_config.js';
 import { BODY_COLS, loadBody } from './tracker.js';
 
 export const ALPHA = 0.1;
@@ -61,7 +61,7 @@ export function trend(rows) {
   return out;
 }
 
-export function verdict(points, goal, rate, plate, since) {
+export function verdict(points, goal, rate, plate, since, plateMax) {
   const win = points.filter(p => !since || p.date >= since);
   const [lo, hi] = expectedBand(goal, rate);
   const out = { state: '', points: win.length, window_days: 0, expected: [lo, hi], slope: null,
@@ -79,7 +79,7 @@ export function verdict(points, goal, rate, plate, since) {
   const step = slope < lo ? PLATE_STEP : -PLATE_STEP;
   const nxt = pyRound(plate + step, 2);
   out.step = step;
-  if (!(PLATE_MIN <= nxt && nxt <= PLATE_MAX)) { out.state = 'at_bound'; return out; }
+  if (!(PLATE_MIN <= nxt && nxt <= plateMax)) { out.state = 'at_bound'; return out; }
   out.state = 'propose';
   out.plate_next = nxt;
   return out;
@@ -142,13 +142,14 @@ export function loadLog(home) {
   return text == null ? [] : readRows(text);
 }
 
-export function summary(rows, diet, prof, logRows, today) {
+export function summary(rows, diet, prof, logRows, today, home) {
   const pts = trend(rows);
   const plate = plateFromDiet(diet);
   const since = strip(has(diet, 'plate_since') ? diet.plate_since : '');
   const goal = strip((has(prof, 'goal') && prof.goal) || 'hold'), rate = strip((has(prof, 'rate') && prof.rate) || 'gentle');
+  const plateMax = plateCeiling(home, occasionsFromDiet(diet));
   return { entries: pts.length, latest: pts.length ? pts[pts.length - 1] : null, trend: pts.slice(-90),
-           verdict: verdict(pts, goal, rate, plate, since), plate, plate_since: since,
+           verdict: verdict(pts, goal, rate, plate, since, plateMax), plate, plate_since: since,
            goal, rate, coverage: coverage(logRows, today),
            sources: pySorted([...new Set(rows.map(r => (has(r, 'source') && r.source) || ''))]) };
 }

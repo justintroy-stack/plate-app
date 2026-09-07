@@ -422,6 +422,10 @@ export function buildDiet(home, store, registry) {
   for (const [k, v] of Object.entries(diet)) if (!NUMERIC.includes(k)) constraints[k] = v;
   const outStates = {};
   for (const [m, s] of Object.entries(states)) if (s.latest === 'above' || s.latest === 'below') outStates[m] = s;
+  // a kidney fact's own number, if he typed one: shown beside the plan's protein target, never
+  // read by a target or a rule above -- compared, not acted on (Phase 14)
+  const kidneyLimit = loadHistory(home).find(h => h.condition === 'kidney' && (h.status === 'active' || h.status === 'confirm') && h.protein_limit_g);
+  for (const c of conditions) if (c.id === 'kidney' && kidneyLimit) c.protein_limit_g = kidneyLimit.protein_limit_g;
   return { lens, constraints, regimen, baseline, targets, unheld, adjustments: fired, notes, calories: cal,
            conditions, condition_avoid: pySorted(condAvoid), states: outStates,
            reads: rulesRead(rules, registry, loadPolicy(home), regimen) };

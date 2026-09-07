@@ -34,6 +34,10 @@ export const DIET_EDITABLE = ['regimen', 'avoid', 'portions', 'occasions', 'equi
 // The plate factor's bounds and step. Outside them a plan cannot be scaled that far: a recipe
 // written for one adult does not survive being cut below half or grown past 140 percent.
 export const PLATE_MIN = 0.5, PLATE_MAX = 1.4, PLATE_STEP = 0.05;
+// A one-meal day's ceiling: the day's whole target rides on the rotation's one plate, the way a
+// three-meal day splits it three ways, so the same recipe reasonably stretches further. Reached
+// only when nothing beside the rotation occasion is a real meal (see isSolo).
+export const PLATE_MAX_SOLO = 2.0;
 // what each target row may hold: [low, high], inclusive; a deficit may be negative, which is a surplus
 export const TARGET_BANDS = { kcal: [500, 10000], protein_g: [20, 500], fiber_g: [0, 200], sat_fat_g: [0, 300],
                               added_sugar_g: [0, 300], deficit_kcal: [-2000, 2000] };
@@ -45,9 +49,14 @@ export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 
 // the first fourteen are food groups an item can belong to; the last four are what a kit or a
 // pantry row is made of (dry spices, plant sauces and condiments, real sugar, the bowl's sweet
 // flavourings), so a plan can leave those out too. No item carries them.
-export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy',
-  'spice', 'sauce', 'sugar', 'sweet', 'gluten', 'purine'];
-export const FOOD_TAGS = TAGS.slice(0, 14);
+export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy', 'gluten',
+  'spice', 'sauce', 'sugar', 'sweet', 'purine', 'vegetarian', 'vegan'];
+export const FOOD_TAGS = TAGS.slice(0, 15);
+// A meal's own composition, derived from its ingredients, not a chip: no meat or fish at all
+// (vegetarian), and within that, no dairy or egg either (vegan). Phase 14.
+export const PLANT_TAGS = ['vegetarian', 'vegan'];
+export const MEAT_FISH_TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish'];
+export const DAIRY_EGG_TAGS = ['dairy', 'egg'];
 /* the tags a condition on the health history leaves out; an allow-list plan never counts them against an item (plate_config.CONDITION_TAGS) */
 export const CONDITION_TAGS = ['gluten', 'purine'];
 // The food behind each count the planner keeps. Red meat in this catalog is beef.
@@ -434,7 +443,11 @@ export function leavesOut(tags, regimen) {
   for (const t of pyIter(tags)) if (excl.has(t)) bad.add(t);
   if (truthy(req(regimen, 'allows'))) {
     const allow = new Set(pyIter(regimen.allows));
-    for (const t of pyIter(tags)) if (!allow.has(t) && !CONDITION_TAGS.includes(t)) bad.add(t);
+    // an allow list speaks food groups (beef, dairy, egg); it was never asked about a
+    // condition's tag or a dish's own vegetarian/vegan composition, so neither ever counts
+    // against it here -- only the excludes line above, where a plan like Everything now names
+    // vegetarian on purpose, ever does (Phase 14)
+    for (const t of pyIter(tags)) if (!allow.has(t) && !CONDITION_TAGS.includes(t) && !PLANT_TAGS.includes(t)) bad.add(t);
   }
   return pySorted([...bad]);
 }
@@ -513,6 +526,24 @@ export function checkChoices(cfg, shop, picks) {
   return null;
 }
 
+/* True when nothing beside the rotation occasion is a real meal's worth of the day (a
+   one-occasion home, or dinner plus a snack): the day the rotation's one plate has to carry
+   alone, the way OMAD does. */
+function isSolo(occasions) {
+  return !occasions.some(o => !o.rotation && o.share >= 1);
+}
+
+/* The plate factor's top for a set of occasions, resolved the same way load resolves which
+   occasions are on: PLATE_MAX_SOLO when nothing beside the rotation occasion is a real meal,
+   else the flat PLATE_MAX every multi-meal day already uses. wantedOccasions:
+   occasionsFromDiet's return, or null for every occasion in the file. */
+export function plateCeiling(home, wantedOccasions) {
+  const [in_file] = loadOccasions(home, 1);
+  const wanted = new Set(wantedOccasions || []);
+  const occasions = in_file.filter(o => !wanted.size || wanted.has(o.id) || o.rotation);
+  return isSolo(occasions) ? PLATE_MAX_SOLO : PLATE_MAX;
+}
+
 /* shop: the stores in play, in preference order (null: all, in file order).
    picks: {item: store} for items more than one store in play carries.
    equipment: the appliances in play, in preference order (null: all, in file order).
@@ -530,9 +561,6 @@ export function load(home, opts = {}) {
   }
   const plate_in = opt('plate');
   const plate = plate_in === null ? 1 : num(plate_in, 1);
-  if (!(PLATE_MIN <= plate && plate <= PLATE_MAX)) {
-    throw new ConfigError('plate must be between ' + numstr(PLATE_MIN) + ' and ' + numstr(PLATE_MAX) + ', not ' + numstr(plate));
-  }
   const [in_file, rotation_occasion] = loadOccasions(home, household);
   // The occasions in play. The catalog is every row in the file, each marked on or off, so a
   // picker can offer the ones that are off; the rotation occasion cannot be turned off, because
@@ -548,7 +576,11 @@ export function load(home, opts = {}) {
   const known_occasions = new Set(in_file.map(o => o.id));
   // The rotation occasion's cold block is the second course of a one-meal day. Beside another
   // meal-sized occasion (a share of one whole part or more) it is put away; a snack leaves it.
-  const solo = !occasions.some(o => !o.rotation && o.share >= 1);
+  const solo = isSolo(occasions);
+  const plate_max = solo ? PLATE_MAX_SOLO : PLATE_MAX;
+  if (!(PLATE_MIN <= plate && plate <= plate_max)) {
+    throw new ConfigError('plate must be between ' + numstr(PLATE_MIN) + ' and ' + numstr(plate_max) + ', not ' + numstr(plate));
+  }
   // The recipe belongs to one occasion, so the meals are cooked for its portions. The household
   // count itself goes back out as cfg.portions untouched: it is what diet.csv said, the Who eats
   // card shows it and writes it back, and an occasion's own count lives on the occasion.
@@ -584,6 +616,11 @@ export function load(home, opts = {}) {
       offers: {}, store: '', pack: 0, buy: '' };
     item_order.push(r.key);
   }
+  // Whether this items.csv carries real food-group tags at all: a file from before the tags
+  // column reads every item's tags as empty, the same shape as a fully tagged file's pantry
+  // items. Meat, fish, dairy and egg are the tags a vegetarian or vegan derivation depends on;
+  // with none anywhere, there is nothing to derive from (Phase 14).
+  const tagged_catalog = Object.values(items).some(it => it.tags.some(t => MEAT_FISH_TAGS.includes(t) || DAIRY_EGG_TAGS.includes(t)));
   for (const r of storeRows(home, item_rows)) {
     if (!get(r, 'item') && !get(r, 'store')) continue;
     if (!has(stores, req(r, 'store'))) throw new ConfigError('store_items.csv: ' + req(r, 'item') + ' names store ' + pyReprStr(r.store) + ', not in stores.csv');
@@ -665,7 +702,15 @@ export function load(home, opts = {}) {
       }
       seen_slots.set(slot, r.id);
     }
-    const contains = containsOf(uses, items);
+    let contains = containsOf(uses, items);
+    // vegetarian: none of its ingredients carry a meat or fish tag; vegan, within that, none
+    // carry dairy or egg either. Read from the ingredients themselves, not protein_class -- a
+    // dish classed by its main protein as egg can still use bacon or sausage alongside it, which
+    // protein_class alone would miss (Phase 14).
+    if (tagged_catalog && !MEAT_FISH_TAGS.some(t => contains.includes(t))) {
+      const plantTags = DAIRY_EGG_TAGS.some(t => contains.includes(t)) ? ['vegetarian'] : ['vegetarian', 'vegan'];
+      contains = pySorted([...new Set([...contains, ...plantTags])]);
+    }
     declared[r.id] = lower(get(r, 'in_pool', 'yes')) !== 'no';
     meals.push({ id: r.id, slot, name: req(r, 'name'), sub: get(r, 'sub', ''), form: get(r, 'form', ''),
       thaw: get(r, 'thaw') || null, protein_item: protein_item || null,
@@ -847,7 +892,7 @@ export function load(home, opts = {}) {
     items, item_order, stores, store_order,
     store_catalog, store_picks: Object.assign({}, picks), unsupplied,
     equipment: equip, equipment_order, equipment_catalog: equip_catalog,
-    hands_on_minutes: hands_on, uncookable, portions: household, plate,
+    hands_on_minutes: hands_on, uncookable, portions: household, plate, plate_max,
     regimens, regimen: reg, avoid, excluded, cold_excluded,
     occasions, occasion_catalog, rotation_occasion,
     rotations: pySorted(Object.keys(rotations)),
@@ -1168,7 +1213,11 @@ export function checkDiet(home, key, value) {
       if (e instanceof PyValueError) throw new ConfigError(key + ' must be a number, not ' + pyReprStr(value));
       throw e;
     }
-    if (!(PLATE_MIN <= p && p <= PLATE_MAX)) throw new ConfigError(key + ' must be between ' + numstr(PLATE_MIN) + ' and ' + numstr(PLATE_MAX) + ', not ' + numstr(p));
+    const { rows: drows } = raw(home, 'diet');
+    const dietNow = {};
+    for (const r of drows) if (r.key) dietNow[r.key] = r.value || '';
+    const pmax = plateCeiling(home, occasionsFromDiet(dietNow));
+    if (!(PLATE_MIN <= p && p <= pmax)) throw new ConfigError(key + ' must be between ' + numstr(PLATE_MIN) + ' and ' + numstr(pmax) + ', not ' + numstr(p));
     return numstr(p);
   }
   if ((key === 'plate_since' || key === 'plate_prev_since') && value) {

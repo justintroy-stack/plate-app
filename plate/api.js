@@ -12,7 +12,7 @@ import { ConfigError, PyValueError, pyRound } from './py.js';
 import { MarkerRegistry } from './markers.js';
 import { CsvStore } from './store.js';
 import { loadProfile } from './policy.js';
-import { loadHistory, appendHistory, CONDITIONS } from './history.js';
+import { loadHistory, appendHistory, updateHistory, removeHistory, CONDITIONS } from './history.js';
 import { loadExplanations } from './explain.js';
 import { loadBody, loadIntake } from './tracker.js';
 import { buildDiet, checkBody, loadDiet, targetPreview, targetsFromProfile, regimenFor, ESTIMATE_KEYS } from './diet.js';
@@ -92,7 +92,7 @@ export function installApi(home, ctx) {
   const registry = () => MarkerRegistry.load(home);
   const store = () => new CsvStore(home);
   const dietOrNull = () => { try { return buildDiet(home, store(), registry()); } catch (e) { return null; } };
-  const weigh = () => bodySummary(loadBody(home), loadDiet(home), loadProfile(home), loadLog(home), today(home.now.bind(home)));
+  const weigh = () => bodySummary(loadBody(home), loadDiet(home), loadProfile(home), loadLog(home), today(home.now.bind(home)), home);
   /* the scale's step applies itself at a weigh-in and Tonight says so with Undo (server.py's _auto_step) */
   const autoStep = () => {
     const v = weigh().verdict;
@@ -121,7 +121,8 @@ export function installApi(home, ctx) {
       return d;
     },
     '/api/history': () => ({ items: loadHistory(home).map(h => ({ date: h.date, category: h.category, item: h.item, status: h.status, detail: h.detail,
-                                                                   affects: h.affects, interval_months: h.interval_months, last_done: h.last_done, condition: h.condition })),
+                                                                   affects: h.affects, interval_months: h.interval_months, last_done: h.last_done, condition: h.condition,
+                                                                   protein_limit_g: h.protein_limit_g })),
                              profile: loadProfile(home), root: '', config_dir: '' }),
     '/api/files': () => {
       const rows = store().load();
@@ -323,12 +324,28 @@ export function installApi(home, ctx) {
     },
     '/api/history': async (q, init) => {
       const body = await bodyJson(init);
+      if (body.remove) {
+        try { removeHistory(home, parseInt(body.index, 10)); } catch (e) { return [{ error: String(e && e.message || e) }, 400]; }
+        await flush(home);
+        return { ok: true };
+      }
       if (!String(body.item || '').trim()) return [{ error: 'item is required' }, 400];
       const cond = String(body.condition || '').trim().toLowerCase();
       if (cond && !CONDITIONS.includes(cond)) return [{ error: 'condition must be one of ' + CONDITIONS.join(', ') }, 400];
+      const limit = String(body.protein_limit_g || '').trim();
+      if (limit) {
+        const n = Number(limit);
+        if (!Number.isFinite(n)) return [{ error: 'protein limit must be a number' }, 400];
+        if (!(n > 0)) return [{ error: 'protein limit must be more than 0' }, 400];
+      }
       const row = {};
-      for (const k of ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done', 'condition']) row[k] = body[k] == null ? '' : body[k];
-      appendHistory(home, row);
+      for (const k of ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done', 'condition', 'protein_limit_g']) row[k] = body[k] == null ? '' : body[k];
+      if (cond !== 'kidney') row.protein_limit_g = '';   // a number the app compares, only where it says which condition it is for
+      if (body.index != null) {
+        try { updateHistory(home, parseInt(body.index, 10), row); } catch (e) { return [{ error: String(e && e.message || e) }, 400]; }
+      } else {
+        appendHistory(home, row);
+      }
       await flush(home);
       return { ok: true };
     },
