@@ -49,7 +49,7 @@ export function assessmentDict(a, registry) {
 
 export function historyDict(h) {
   return { date: h.date, category: h.category, item: h.item, status: h.status, detail: h.detail,
-           affects: h.affects, interval_months: h.interval_months, last_done: h.last_done };
+           affects: h.affects, interval_months: h.interval_months, last_done: h.last_done, condition: h.condition };
 }
 
 export function lastDrawDate(rows) {

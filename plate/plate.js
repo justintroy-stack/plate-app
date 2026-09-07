@@ -27,8 +27,8 @@ export const LOG_COLUMNS = ['logged_at', 'cursor', 'meal_index', 'meal_id', 'mea
 
 /* The food config, resolved for the stores the profile says are in play, for the kitchen
    diet.csv describes, for the regimen it names and for the portions it is cooked for. */
-export function config(home, plate = null) {
-  return pc.loadFor(home, loadProfile(home), loadDiet(home), plate);
+export function config(home, plate = null, avoidMore = null) {
+  return pc.loadFor(home, loadProfile(home), loadDiet(home), plate, avoidMore);
 }
 
 /* The rotation as the phone last mirrored it (meal ids by position), or null. */
@@ -45,8 +45,11 @@ export function currentOrder(home) {
 /* Everything the page needs: the config plus, when the food targets are known, the plan that
    reshapes the rotation to meet them. */
 export function payload(home, diet, cfg) {
-  cfg = cfg || config(home);
+  cfg = cfg || config(home, null, diet ? (diet.condition_avoid || null) : null);
   const out = Object.assign({}, cfg);
+  // what the health history leaves out and why, so the page can tell a chip from a condition (plate.py's payload)
+  out.condition_avoid = diet ? [...(diet.condition_avoid || [])] : [];
+  out.conditions = diet ? [...(diet.conditions || [])] : [];
   out.plan = diet ? buildPlan(cfg, diet, currentOrder(home)) : null;
   out.plate_step = stepped(loadDiet(home));
   out.group_note = groupNote(cfg);

@@ -15,6 +15,7 @@ import { ConfigError, lower, orEmpty, pyFloat, pyReprStr, pyRound, pySorted, str
 import { daysBetween, parseIso } from './pydate.js';
 import { COUNT_TAGS, COUNT_WORDS, TARGET_WORDS, leavesOut, loadFor, loadRegimens, numstr, regimenFromDiet } from './plate_config.js';
 import { ageOn, loadPolicy, loadProfile } from './policy.js';
+import { loadHistory } from './history.js';
 import { plateFor } from './rotation.js';
 import { req } from './pyx.js';
 import { loadTargets, targetShort, targetStatus } from './targets.js';
@@ -30,6 +31,9 @@ export const GOALS = ['hold', 'lose', 'gain'];
 export const RATES = { gentle: 250, steady: 500 };     // kcal a day under (or over) maintenance
 export const BODY_KEYS = ['weight_lb', 'height_in', 'sex', 'dob', 'activity', 'goal', 'rate'];
 export const PROTEIN_PER_LB = 0.8;
+/* what a fact on the health history can be marked as, in the words the screens use (diet.py's CONDITION_WORDS) */
+export const CONDITION_WORDS = { celiac: 'celiac disease', gout: 'gout', hypertension: 'high blood pressure',
+                                 diabetes: 'diabetes or prediabetes', kidney: 'a kidney condition' };
 export const PROTEIN_BAND = [60, 220];                  // grams a day; 0.8 g per lb outside this is clamped to it
 export const FIBER_PER_1000_KCAL = 14;
 export const SAT_FAT_SHARE = 0.10;
@@ -86,7 +90,7 @@ export function checkBody(key, value) {
    added sugar 20 g flat. Calories to the nearest 10 and protein to the nearest 5: the estimate
    is within about 15 percent for any one person, and a number that looks exact would be lying
    about that. Every rounding is Python's round(), half to even. */
-export function targetsFromBody(weight_lb, height_in, sex, age, activity, goal, rate) {
+export function targetsFromBody(weight_lb, height_in, sex, age, activity, goal, rate, protein_per_lb = null) {
   const kg = weight_lb * 0.45359237;
   const cm = height_in * 2.54;
   const bmr = 10 * kg + 6.25 * cm - 5 * age + (sex === 'm' ? 5 : -161);
@@ -94,10 +98,13 @@ export function targetsFromBody(weight_lb, height_in, sex, age, activity, goal, 
   const deficit = goal === 'hold' ? 0 : (goal === 'lose' ? RATES[rate] : -RATES[rate]);
   const kcal_raw = pyRound((maintenance - deficit) / 10) * 10;
   const kcal = Math.max(kcal_raw, KCAL_FLOOR);
-  const protein_raw = pyRound(weight_lb * PROTEIN_PER_LB / 5) * 5;
+  // the plan's own floor when it declares one (regimens.csv protein_per_lb, Phase 13), else 0.8
+  const per_lb = protein_per_lb === null ? PROTEIN_PER_LB : pyFloat(String(protein_per_lb));
+  const protein_raw = pyRound(weight_lb * per_lb / 5) * 5;
   const protein = Math.min(PROTEIN_BAND[1], Math.max(PROTEIN_BAND[0], protein_raw));
   return { bmr: pyRound(bmr), maintenance: pyRound(maintenance / 10) * 10, kcal,
            protein_g: protein, protein_clamped: protein !== protein_raw, kcal_floored: kcal !== kcal_raw,
+           protein_per_lb: per_lb,
            fiber_g: pyRound(kcal * FIBER_PER_1000_KCAL / 1000), sat_fat_g: pyRound(kcal * SAT_FAT_SHARE / 9),
            added_sugar_g: ADDED_SUGAR_G, deficit_kcal: deficit };
 }
@@ -105,7 +112,20 @@ export function targetsFromBody(weight_lb, height_in, sex, age, activity, goal, 
 /* The estimate from the profile's About-you rows: the numbers with the body they came from, or
    `missing`, the rows still needed (a row that cannot be read counts as missing). The rate is
    gentle unless stated, and is not needed to hold. `today` is an ISO date. */
-export function targetsFromProfile(prof, today) {
+/* the plan diet.csv names, as loadRegimens reads it, or null (diet.py's regimen_for) */
+export function regimenFor(home, diet) {
+  const rid = regimenFromDiet(diet);
+  return rid ? (loadRegimens(home).find(r => r.id === rid) || null) : null;
+}
+
+/* the condition ids on the health history's active or confirm rows, sorted (diet.py's conditions_on_file) */
+export function conditionsOnFile(home) {
+  const ids = new Set();
+  for (const h of loadHistory(home)) if (h.condition && (h.status === 'active' || h.status === 'confirm')) ids.add(h.condition);
+  return pySorted([...ids]);
+}
+
+export function targetsFromProfile(prof, today, regimen = null) {
   prof = prof || {};
   const val = k => strip(has(prof, k) ? prof[k] : '');
   const missing = BODY_KEYS.filter(k => k !== 'rate' && !val(k));
@@ -119,8 +139,10 @@ export function targetsFromProfile(prof, today) {
   const bad = [['sex', !!sex], ['dob', age !== null], ['activity', has(ACTIVITY, activity)], ['goal', GOALS.includes(goal)], ['rate', has(RATES, rate)]]
     .filter(([, ok]) => !ok).map(([k]) => k);
   if (bad.length) return { missing: bad };
-  const out = targetsFromBody(weight, height, sex, age, activity, goal, rate);
-  return Object.assign(out, { missing: [], age, weight_lb: weight, height_in: height, sex, activity, goal, rate });
+  const per_lb = regimen && regimen.protein_per_lb != null ? regimen.protein_per_lb : null;
+  const out = targetsFromBody(weight, height, sex, age, activity, goal, rate, per_lb);
+  return Object.assign(out, { missing: [], age, weight_lb: weight, height_in: height, sex, activity, goal, rate,
+                              protein_plan: per_lb !== null ? req(regimen, 'name') : '' });
 }
 
 /* What About you would set, before anything is written: each answer checked the way the save
@@ -129,13 +151,13 @@ export function targetsFromProfile(prof, today) {
 export function targetPreview(home, profile, answers, today) {
   const prof = {};
   for (const [key, value] of Object.entries(profile || {})) prof[strip(key)] = checkBody(strip(key), value);
-  const estimate = targetsFromProfile(prof, today);
+  const diet = loadDiet(home);
+  for (const key of ['regimen', 'occasions', 'portions']) {
+    if (answers && answers[key] != null) diet[key] = strip(String(answers[key]));
+  }
+  const estimate = targetsFromProfile(prof, today, regimenFor(home, diet));
   const out = { estimate, plate: null, kcal: null };
   if (!estimate.missing.length) {
-    const diet = loadDiet(home);
-    for (const key of ['regimen', 'occasions', 'portions']) {
-      if (answers && answers[key] != null) diet[key] = strip(String(answers[key]));
-    }
     /* one figure sizes the plate and is the figure the line says: the body's estimate (diet.py's target_preview) */
     const kcal = pyFloat(String(estimate.kcal));
     out.kcal = kcal;
@@ -257,7 +279,7 @@ export function rulesRead(rules, registry, policy, regimen = null) {
   const out = [], seen = {};
   const unmoved = (regimen && regimen.unmoved_by) || [];
   for (const r of rules) {
-    if (r.target === 'note' || r.adjustment === 'recalibrate') continue;
+    if (r.target === 'note' || r.adjustment === 'recalibrate' || !strip(orEmpty(r.marker))) continue;   // a note, the recalibration, or a row keyed to the history
     const m = req(r, 'marker');
     let e = has(seen, m) ? seen[m] : null;
     if (e === null) {
@@ -300,7 +322,48 @@ export function buildDiet(home, store, registry) {
   }
   const baseline = Object.assign({}, targets);
   const fired = [], notes = [];
+  // the condition rows first (diet.py's build_diet): a fact on file is prior to any draw
+  const onFile = conditionsOnFile(home);
+  const conditions = [], condAvoid = [];
   for (const rule of rules) {
+    const hid = strip(orEmpty(rule.history));
+    if (!hid || !onFile.includes(hid)) continue;
+    const word = has(CONDITION_WORDS, hid) ? CONDITION_WORDS[hid] : hid;
+    let c = conditions.find(x => x.id === hid) || null;
+    if (c === null) { c = { id: hid, word, tags: [], moves: [], notes: [] }; conditions.push(c); }
+    const entry = { rule: req(rule, 'rule_id'), marker: '', history: hid, display: word, condition: rule.condition,
+                    value: '', unit: '', date: '', target_text: '', basis: req(rule, 'basis'), note: req(rule, 'note') };
+    const adj = rule.adjustment, key = rule.target;
+    if (key === 'note') { notes.push(entry); c.notes.push(rule.note); continue; }
+    if (adj.startsWith('leave_out:')) {
+      const tag = strip(adj.slice('leave_out:'.length));
+      if (tag && !condAvoid.includes(tag)) condAvoid.push(tag);
+      if (tag && !c.tags.includes(tag)) c.tags.push(tag);
+      continue;
+    }
+    if (!has(targets, key) && !unheld.includes(key)) continue;
+    if (regimen && has(COUNT_TAGS, key) && leavesOut([COUNT_TAGS[key]], regimen).length) {
+      entry.target = key; entry.not_applicable = true;
+      entry.note = 'Not applicable: there is no ' + COUNT_WORDS[key] + ' night on the ' + lower(req(regimen, 'name')) + ' plan to trade, so dinner stays.';
+      notes.push(entry);
+      continue;
+    }
+    if (unheld.includes(key)) {
+      entry.target = key; entry.not_applicable = true;
+      entry.note = 'Not applicable: ' + (has(TARGET_WORDS, key) ? TARGET_WORDS[key] : key) + ' is not a target on the ' + lower(req(regimen, 'name')) + ' plan, so nothing moves.';
+      notes.push(entry);
+      continue;
+    }
+    const before = targets[key];
+    if (adj.startsWith('max:')) targets[key] = Math.min(targets[key], pyFloat(adj.slice(4)));
+    else if (adj.startsWith('min:')) targets[key] = Math.max(targets[key], pyFloat(adj.slice(4)));
+    else if (adj.startsWith('+') || adj.startsWith('-')) targets[key] = targets[key] + pyFloat(adj);
+    entry.target = key; entry.before = before; entry.after = targets[key]; entry.changed = targets[key] !== before;
+    fired.push(entry);
+    if (targets[key] !== before) c.moves.push([key, before, targets[key]]);
+  }
+  for (const rule of rules) {
+    if (strip(orEmpty(rule.history))) continue;                  // keyed to the history, fired above
     const m = req(rule, 'marker');
     if (req(rule, 'target') === 'kcal' && req(rule, 'adjustment') === 'recalibrate') continue;
     const st = has(states, m) ? states[m] : null;
@@ -359,6 +422,7 @@ export function buildDiet(home, store, registry) {
   for (const [k, v] of Object.entries(diet)) if (!NUMERIC.includes(k)) constraints[k] = v;
   const outStates = {};
   for (const [m, s] of Object.entries(states)) if (s.latest === 'above' || s.latest === 'below') outStates[m] = s;
-  return { lens, constraints, regimen, baseline, targets, unheld, adjustments: fired, notes, calories: cal, states: outStates,
+  return { lens, constraints, regimen, baseline, targets, unheld, adjustments: fired, notes, calories: cal,
+           conditions, condition_avoid: pySorted(condAvoid), states: outStates,
            reads: rulesRead(rules, registry, loadPolicy(home), regimen) };
 }

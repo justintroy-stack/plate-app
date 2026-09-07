@@ -94,7 +94,13 @@ const KITS=CFG.kits, SLOTS=CFG.cold, I=CFG.items, IORDER=CFG.item_order, STORES=
 const SCAT=CFG.store_catalog||SORDER, UNSUP=CFG.unsupplied||[];   /* every store, and what no store in play carries */
 const EQUIP=CFG.equipment||{}, BUDGET=CFG.hands_on_minutes, NOCOOK=CFG.uncookable||[];   /* the kitchen: its appliances, the hands-on budget, what it cannot cook */
 const REG=CFG.regimen||null, REGS=CFG.regimens||[], NOREG=CFG.excluded||[], NOCOLD=CFG.cold_excluded||[];   /* how you eat: the plan in play, every plan on file, what it leaves out */
-const AVOID=CFG.avoid||[];              /* what the person will not eat, on top of the plan: food-group tags */
+const AVOID=CFG.avoid||[];              /* what the person will not eat, on top of the plan: food-group tags, and what the health history leaves out */
+const CONDS=CFG.conditions||[], CAVOID=CFG.condition_avoid||[];   /* the conditions on the health history that fired, and the tags they leave out (Phase 13) */
+const AVOID_OWN=AVOID.filter(t=>!CAVOID.includes(t));               /* the person's own chips, without what a condition added */
+/* what a fact on the history can be marked as, in the words the screens use (diet.py's CONDITION_WORDS, pinned by test), and the lever each pulls */
+const HCOND=[['celiac','celiac disease'],['gout','gout'],['hypertension','high blood pressure'],['diabetes','diabetes or prediabetes'],['kidney','a kidney condition']];
+const HLEVER={celiac:'gluten out',gout:'purine-rich food out, red meat nights capped at 2',hypertension:'the fat cap and the fibre floor',diabetes:'the sugar cap and the fibre floor',kidney:'nothing moves here; protein is your kidney doctor\'s number'};
+const condWord=id=>{const c=HCOND.find(x=>x[0]===id);return c?c[1]:id;};
 /* When you eat: the occasions, and the one that carries the recipe. One cursor tick is one
    eating cycle, every occasion once, so the rotation still advances by one meal per log. */
 const OCC=CFG.occasions||[{id:'dinner',name:'Dinner',rotation:true}], ROT=(OCC.find(o=>o.rotation)||OCC[0]).id;
@@ -161,7 +167,9 @@ const unitOf=(k,v)=>{const u=I[k].unit;if(!u||u==='each')return '';
   return (v===1&&u.length>1&&u.slice(-1)==='s'?u.slice(0,-1):u)+' ';};
 const qty=u=>Object.entries(u||{}).filter(([k,v])=>v!=null&&I[k]).map(([k,v])=>
   fmt(v)+' '+unitOf(k,v)+I[k].name.toLowerCase()).join(', ');
-const notOn=x=>{const av=(x.excluded||[]).filter(t=>AVOID.includes(t));return av.length?'Has '+tagWords(av)+', which you leave out.':'Not on the '+planName()+' plan: has '+tagWords(x.excluded||[])+'.';};
+const notOn=x=>{const cv=(x.excluded||[]).filter(t=>CAVOID.includes(t));
+  if(cv.length){const c=CONDS.find(c=>(c.tags||[]).some(t=>cv.includes(t)));return 'Has '+tagWords(cv)+', which '+(c?c.word:'your history')+' on your history leaves out.';}
+  const av=(x.excluded||[]).filter(t=>AVOID_OWN.includes(t));return av.length?'Has '+tagWords(av)+', which you leave out.':'Not on the '+planName()+' plan: has '+tagWords(x.excluded||[])+'.';};
 const PLAN=CFG.plan||null, SWAPS=PLAN?PLAN.swaps:[], SWAP={};SWAPS.forEach(s=>SWAP[s.key]=s);
 const FULL={},EMPTY={};IORDER.forEach(k=>{FULL[k]=I[k].pack;EMPTY[k]=0;});
 
@@ -372,7 +380,8 @@ function extraItems(){return IORDER.filter(k=>(S.inv[k]||0)>0);}
    picker needs them live, because the chips change under a person's thumb. */
 const shortName=n=>String(n||'').split(' — ')[0];
 function leavesOut(tags,reg){if(!reg)return[];const ex=new Set(reg.excludes||[]),bad=new Set();(tags||[]).forEach(t=>{if(ex.has(t))bad.add(t);});
-  if((reg.allows||[]).length){const al=new Set(reg.allows);(tags||[]).forEach(t=>{if(!al.has(t))bad.add(t);});}return[...bad].sort();}
+  if((reg.allows||[]).length){const al=new Set(reg.allows);(tags||[]).forEach(t=>{if(!al.has(t)&&!COND_TAGS.includes(t))bad.add(t);});}return[...bad].sort();}
+const COND_TAGS=['gluten','purine'];   /* what a condition on the history leaves out: never counted against an allow-list plan (plate_config.CONDITION_TAGS) */
 function effFor(reg,avoid){if(!(avoid||[]).length)return reg;const e=Object.assign({},reg||{id:'',name:'',allows:[],excludes:[],note:''});
   e.excludes=[...new Set([...(e.excludes||[]),...avoid])].sort();return e;}
 const CHIP_TAGS=['beef','pork','poultry','fish','shellfish','dairy','egg','beans','grain','potato','fruit','nuts','vegetable','soy'];   /* the food groups a person can leave out: plate_config.FOOD_TAGS */
@@ -649,7 +658,7 @@ window.act={
     page again, as the store picker does */
  async saveRegimen(){const v=RSEL==null?(REG?REG.id:''):RSEL, av=ticked('rg-avoid-',CHIP_TAGS).join('|');
    try{await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'regimen',value:v})});
-     if(av!==AVOID.join('|'))await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'avoid',value:av})});
+     if(av!==AVOID_OWN.join('|'))await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'avoid',value:av})});
      returnTo({at:'regimen'});say('Saved. Rebuilding the rotation.');setTimeout(()=>location.reload(),350);}
    catch(e){RMSG=e.message;render();}},
  sed(k,v){SED[k]=v;},
@@ -688,7 +697,7 @@ window.act={
  async addHist(){
    const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
    const obj={item:g('hItem'),category:g('hCat'),status:g('hStatus'),date:g('hDate'),affects:g('hAff'),
-     interval_months:g('hInt'),last_done:g('hLast'),detail:g('hDetail')};
+     interval_months:g('hInt'),last_done:g('hLast'),detail:g('hDetail'),condition:g('hCond')};
    if(!obj.item){MSG='Give the fact a name.';render();return;}
    try{await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});
      HIST=null;DRAW=null;MSG='';say('Added.');}
@@ -1103,6 +1112,13 @@ const TLABEL={kcal:'Calories', protein_g:'Protein', fiber_g:'Fiber, daily floor'
   beans_slots:'Bean nights per cycle', deficit_kcal:'Daily deficit'};
 const tlabel=k=>TLABEL[k]||String(k).replace(/_/g,' ').replace(/ g$/,'');
 const tunit=k=>(k==='kcal'||k==='deficit_kcal')?' kcal':/_g$/.test(k)?' g':'';
+/* who moved a target's number: a fact on the history (Phase 13), else a marker */
+const movedBy=(d,k)=>{const a=(d.adjustments||[]).find(a=>a.target===k&&a.changed);return a&&a.history?a.display+' on your history':'a marker';};
+/* a condition that fired, in one sentence: what it leaves out, what it moved, or its note */
+function condLine(c){const parts=[];if((c.tags||[]).length)parts.push('leaves '+tagWords(c.tags)+' out');
+  (c.moves||[]).forEach(m=>parts.push(tlabel(m[0]).toLowerCase()+' '+fmt(m[1])+' to '+fmt(m[2])+tunit(m[0])));
+  const head=c.word.replace(/^\w/,ch=>ch.toUpperCase())+' on your history';
+  return parts.length?head+': '+parts.join(', ')+'.':((c.notes||[]).length?head+': '+c.notes.join(' '):head+'.');}
 const WORDS=['no','one','two','three','four','five','six','seven','eight','nine'];
 const word=n=>WORDS[n]||String(n);
 const list=a=>a.length<2?a.join(''):a.slice(0,-1).join(', ')+' and '+a[a.length-1];
@@ -1389,10 +1405,11 @@ function viewOverview(){
     aside+='<section class="card card--tint" data-family="sprout"><span class="t-label">Your food targets now</span><div class="rows">';
     keys.forEach(k=>{const b=d.baseline[k],t=d.targets[k],changed=t!==b;
       aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(tlabel(k))+'</span>'+
-        '<span class="row__meta">'+(changed?'was '+esc(b)+esc(tunit(k))+', moved by a marker':'as your plan was built')+'</span></span>'+
+        '<span class="row__meta">'+(changed?'was '+esc(b)+esc(tunit(k))+', moved by '+esc(movedBy(d,k)):'as your plan was built')+'</span></span>'+
         '<b class="row__val">'+esc(t)+esc(tunit(k))+'</b></div>';});
+    const conds=(d.conditions||[]).length?'<p class="t-note" style="margin-top:var(--s2)">'+esc(d.conditions.map(condLine).join(' '))+'</p>':'';
     const unheld=(d.unheld||[]).length?'<p class="t-note" style="margin-top:var(--s2)">'+esc(list(d.unheld.map(k=>TARGET_WORD[k]||k)).replace(/^\w/,c=>c.toUpperCase()))+(d.unheld.length>1?' are not targets':' is not a target')+' on '+esc(Plan())+': its plates are built without '+(d.unheld.length>1?'them':'it')+'.</p>':'';
-    aside+='</div>'+unheld+'<p class="t-note" style="margin-top:var(--s3)">'+(planStays()?'The rotation is built to hit these. On '+esc(Plan())+' a report is charted and dinner stays; the added-sugar cap is the one number a report can still tighten.'
+    aside+='</div>'+conds+unheld+'<p class="t-note" style="margin-top:var(--s3)">'+(planStays()?'The rotation is built to hit these. On '+esc(Plan())+' a report is charted and dinner stays; the added-sugar cap is the one number a report can still tighten.'
       :'The rotation is built to hit these. A marker outside its target moves one of them, and the Rotation tab shows where that lands.')+'</p></section>';
   }
 
@@ -1666,7 +1683,7 @@ const PROTWORD={red_meat:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellf
 const famOf=m=>PROTFAM[m.protein_class]||'sprout';
 /* The food-group note under the rotation: one group that lands three or more times on a night
    whatever the cold block draws. The engine counts it in both twins; the page only says it. */
-const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings'};
+const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings',gluten:'gluten',purine:'purine-rich food'};
 const tagWords=ts=>list((ts||[]).map(t=>TAGWORD[t]||t));
 const NUMWORD=['no','one','two','three','four','five','six','seven','eight','nine'];
 function groupLine(g){
@@ -1762,7 +1779,7 @@ function whyCard(F,opt){
     if(mk)h+='<button class="btn btn--sm btn--quiet" type="button" data-fk="why:'+esc(mk)+'" style="margin-top:var(--s2);padding-left:0" '+
       'onclick="act.trend(\''+esc(mk)+'\')">See the marker '+icon('arrow')+'</button>';
   });
-  if(left.length)h+='<p class="t-note" style="margin-top:var(--s3)">'+left.length+' meal'+(left.length===1?' is':'s are')+(REG?' not on the '+esc(planName())+' plan':' have what you leave out')+' and nothing in the catalog can replace '+(left.length===1?'it':'them')+': '+
+  if(left.length)h+='<p class="t-note" style="margin-top:var(--s3)">'+left.length+' meal'+(left.length===1?' is':'s are')+(left.every(u=>(u.excluded||[]).length&&(u.excluded||[]).every(t=>CAVOID.includes(t)))?' left out by a condition on your history':REG?' not on the '+esc(planName())+' plan':' have what you leave out')+' and nothing in the catalog can replace '+(left.length===1?'it':'them')+': '+
     esc([...new Set(left.map(u=>u.name))].join(', '))+'. '+(left.length===1?'It stays':'They stay')+' until a meal that fits is added.</p>';
   return h+'</section>';
 }
@@ -1870,7 +1887,8 @@ function viewKitchen(F){
   const noreg=NOREG.filter(k=>MEALS[k]&&S.order.includes(k));
   const nocold=NOCOLD.filter(c=>{const sl=SLOTS.find(s=>s.id===c.slot);const o=sl&&sl.opts.find(x=>x.label===c.label);
     return !!o&&(o.excluded_items||[]).some(k=>(S.inv[k]||0)>0);});
-  if((REG||AVOID.length)&&(noreg.length||nocold.length))hero+='<section class="card card--tint" data-family="ember"><span class="t-label">'+(REG?'Not on the '+esc(planName())+' plan':'What you leave out')+'</span>'+
+  const byHist=CAVOID.length&&noreg.every(k=>(MEALS[k].excluded||[]).every(t=>CAVOID.includes(t)))&&nocold.every(c=>{const sl=SLOTS.find(s=>s.id===c.slot);const o=sl&&sl.opts.find(x=>x.label===c.label);return !!o&&(o.excluded||[]).every(t=>CAVOID.includes(t));});
+  if((REG||AVOID.length)&&(noreg.length||nocold.length))hero+='<section class="card card--tint" data-family="ember"><span class="t-label">'+(byHist?'Left out by your history':REG?'Not on the '+esc(planName())+' plan':'What you leave out')+'</span>'+
     '<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">'+(noreg.length?esc(noreg.map(k=>MEALS[k].name+' (has '+tagWords(MEALS[k].excluded)+')').join(', '))+'. ':'')+
     (nocold.length?'From the cold block: '+esc(nocold.map(c=>c.label).join(', '))+'. ':'')+
     'Each leaves the rotation once the stock it was eating is gone, and nothing swaps it back in while it stays left out.</p>'+
@@ -2457,10 +2475,10 @@ function viewRegimen(){
     '<div class="formgrid"><div class="field wide"><span>Plan</span><select data-fk="regsel" onchange="act.regimenPick(this.value)">'+
     '<option value=""'+(cur===''?' selected':'')+'>No plan: any meal in the catalog</option>'+
     REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===cur?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' dinners</option>').join('')+'</select></div></div>';
-  const rav=RAV||AVOID;
+  const rav=RAV||AVOID_OWN;
   h+='<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat, on top of the plan. A meal, a cold option, a kit or a pantry row that has it leaves the pool.</p>'+fieldAvoid('rg-avoid-',rav,r);
-  if(AVOID.length){const gone=[...new Set(S.order.filter(k=>MEALS[k]&&(MEALS[k].excluded||[]).some(t=>AVOID.includes(t))))];
-    h+='<p class="t-note" style="margin-top:var(--s2)">You leave out '+esc(list(AVOID.map(t=>TAGWORD[t]||t)))+'. '+(gone.length?gone.length+' of your '+N+' rotation nights change ('+esc(gone.map(k=>MEALS[k].name).join(', '))+'), each once the stock it was eating is gone.':'Nothing in your rotation has it.')+'</p>';}
+  if(AVOID_OWN.length){const gone=[...new Set(S.order.filter(k=>MEALS[k]&&(MEALS[k].excluded||[]).some(t=>AVOID_OWN.includes(t))))];
+    h+='<p class="t-note" style="margin-top:var(--s2)">You leave out '+esc(list(AVOID_OWN.map(t=>TAGWORD[t]||t)))+'. '+(gone.length?gone.length+' of your '+N+' rotation nights change ('+esc(gone.map(k=>MEALS[k].name).join(', '))+'), each once the stock it was eating is gone.':'Nothing in your rotation has it.')+'</p>';}
   if(!r)h+='<p class="t-body" id="rg-planline" style="margin-top:var(--s3);color:var(--ink)">'+esc(planLine(null,rav))+'</p>';
   if(r){
     const out=new Set(r.leaves_out_meals||[]), gone=S.order.filter(k=>out.has(k)), names=[...new Set(gone.map(k=>MEALS[k]?MEALS[k].name:k))];
@@ -2604,7 +2622,7 @@ function targetLine(){
   if(TGT.error)return TGT.error;
   const e=TGT.estimate||{}, k=TGT.kcal!=null?TGT.kcal:e.kcal;
   if(e.missing&&e.missing.length)return 'Still needed: '+list(e.missing.map(k=>BODYLABEL[k]||k))+'.';
-  let s='About '+k.toLocaleString()+' kcal and '+e.protein_g+' g protein a day'+(e.goal==='hold'?'.':e.goal==='lose'?', to lose '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.':', to gain '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.');
+  let s='About '+k.toLocaleString()+' kcal and '+e.protein_g+' g protein a day'+(e.protein_plan?', the '+e.protein_plan.toLowerCase()+' plan\'s floor of '+e.protein_per_lb+' g per lb':'')+(e.goal==='hold'?'.':e.goal==='lose'?', to lose '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.':', to gain '+(e.rate==='steady'?'about a pound':'about half a pound')+' a week.');
   if(e.kcal_floored)s+=' Held at '+e.kcal.toLocaleString()+' kcal, the lowest the plates go.';
   if(e.protein_clamped)s+=' Protein is held to '+e.protein_g+' g, the edge of the band the plan uses.';
   const p=TGT.plate;
@@ -2673,7 +2691,7 @@ function viewFirstRun(){
     REGS.map(x=>'<option value="'+esc(x.id)+'"'+(x.id===regDefault?' selected':'')+'>'+esc(x.name)+' · '+fit(x)+' dinners</option>').join('')+
     '<option value=""'+(regDefault===''?' selected':'')+'>No plan: any meal in the catalog</option></select></div>'+
     '<div class="field"><span>People</span><input type="number" id="fr-people" data-fk="fr-people" min="1" max="100" step="1" value="'+esc(fmt(PORTIONS))+'"></div></div>'+
-    '<p class="t-note" id="fr-planline" style="margin:var(--s2) 0 0">'+esc(planLine(REGS.find(x=>x.id===regDefault)||null,AVOID))+'</p>'+
+    '<p class="t-note" id="fr-planline" style="margin:var(--s2) 0 0">'+esc(planLine(REGS.find(x=>x.id===regDefault)||null,AVOID_OWN))+'</p>'+
     '<span class="t-label" style="display:block;margin-top:var(--s4)">Leave out</span><p class="t-note" style="margin:var(--s1) 0 0">Anything you will not eat, on top of the plan. A meal, a cold option, a kit or a pantry row that has it leaves the pool.</p>'+fieldAvoid('fr-avoid-',AVOID,REGS.find(x=>x.id===regDefault)||null)+'</section>';
   h+='<section class="card fr-card" id="fr-c1"><span class="t-label">What you cook on</span>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A meal is written for each of these. Tick what your kitchen has.</p>'+
@@ -2889,7 +2907,7 @@ function viewProfile(){
         '<dt>Knowing yours</dt><dd>Plateside cannot compute it: PREVENT needs your blood pressure and whether you smoke, have diabetes or take a statin or a blood-pressure pill, none of which the app asks. Your clinician can, in a minute, from the same blood work; so can the calculator at professional.heart.org. Until then the guideline default, intermediate, stands.</dd>'+
         '<dt>What it changes</dt><dd>Three targets: LDL, non-HDL and ApoB. A higher tier asks for lower lines. Nothing else in the app reads it.</dd>'+
         '<dt>The lens</dt><dd>Conventional judges every number against the major guidelines\' targets; functional against the tighter optimal ranges from functional and longevity medicine. Both are always shown on every marker. The lens picks which one counts as outside target, and outside target is what the food rules read, so a stricter lens can move more nights of the rotation'+esc(reportLine('lens'))+'.</dd>'+
-        '<dt>Your history</dt><dd>A fact added below changes two things today: the draw plan, so what to test next and how soon, and the panels it sits beside. It never changes dinner. Only the tier and the lens change which targets judge you.</dd>'+
+        '<dt>Your history</dt><dd>A fact added below changes the draw plan, so what to test next and how soon, and the panels it sits beside. It changes dinner only when you mark it as one of five conditions: '+esc(HCOND.map(([id,w])=>w+' ('+HLEVER[id]+')').join('; '))+'. Only the tier and the lens change which targets judge you.</dd>'+
         '<dt>Why it matters</dt><dd>These two settings decide what outside target means for you, and that is the one thing the food rules read. Set them once, with your clinician if you can. The wrong tier judges your cholesterol against the wrong line.</dd>'+
       '</dl></div></div></div>';
   lens+='</section>';
@@ -2905,9 +2923,10 @@ function viewProfile(){
     '<div class="btnrow"><button class="btn btn--ink" type="button" data-fk="guideagain" onclick="act.guideAgain()">Show me around again</button></div></section>';
   let aside=viewAppearance()+guide+data+lens;
   aside+='<section class="card" data-family="plum"><div class="split"><span class="t-label">Health history</span><span class="mono" style="color:var(--ink-3)">'+(h0.items||[]).length+' facts</span></div>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them.</p><div class="rows">';
+    '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them. A fact marked as a condition pulls one lever the food rules already have, and the row says which.</p><div class="rows">';
   (h0.items||[]).forEach(x=>{aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
-    ((x.affects||[]).length?' · touches '+esc(x.affects.join(', ')):'')+(x.interval_months?' · every '+x.interval_months+' mo':'')+(x.last_done?', last '+esc(x.last_done):'')+'</span>'+
+    ((x.affects||[]).length?' · touches '+esc(x.affects.join(', ')):'')+(x.interval_months?' · every '+x.interval_months+' mo':'')+(x.last_done?', last '+esc(x.last_done):'')+
+    (x.condition?' · '+esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||''):'')+'</span>'+
     (x.detail?'<span class="row__note">'+esc(x.detail)+'</span>':'')+'</span></div>';});
   aside+='</div></section>';
   aside+='<section class="card"><span class="t-label">Add a fact</span><div class="formgrid" style="margin-top:var(--s3)">'+
@@ -2919,6 +2938,7 @@ function viewProfile(){
     '<div class="field"><span>Repeat every, months</span><input id="hInt" data-fk="hint" type="number" min="1"></div>'+
     '<div class="field"><span>Last done</span><input id="hLast" data-fk="hlast" placeholder="2026-02-01"></div>'+
     '<div class="field wide"><span>Detail</span><input id="hDetail" data-fk="hdetail"></div>'+
+    '<div class="field wide"><span>Marks it as</span><select id="hCond" data-fk="hcond"><option value="">nothing the food rules read</option>'+HCOND.map(([id,w])=>'<option value="'+id+'">'+esc(w)+' · '+esc(HLEVER[id])+'</option>').join('')+'</select></div>'+
     '<div class="field"><span>&nbsp;</span><button class="btn btn--ink" type="button" data-fk="hadd" onclick="act.addHist()">Add</button></div></div>'+
     (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
   aside+=storyCard();

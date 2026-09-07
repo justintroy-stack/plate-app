@@ -38,7 +38,7 @@ export const PLATE_MIN = 0.5, PLATE_MAX = 1.4, PLATE_STEP = 0.05;
 export const TARGET_BANDS = { kcal: [500, 10000], protein_g: [20, 500], fiber_g: [0, 200], sat_fat_g: [0, 300],
                               added_sugar_g: [0, 300], deficit_kcal: [-2000, 2000] };
 export const DIET_COLUMNS = ['key', 'value', 'note'];
-export const REGIMEN_COLUMNS = ['id', 'name', 'allows', 'excludes', 'red_meat_slots', 'fish_slots', 'beans_slots', 'unmoved_by', 'note'];
+export const REGIMEN_COLUMNS = ['id', 'name', 'allows', 'excludes', 'red_meat_slots', 'fish_slots', 'beans_slots', 'unmoved_by', 'unheld', 'protein_per_lb', 'note'];
 export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 'note'];
 // The food groups an ingredient can belong to. A regimen speaks in these, so a tag outside the
 // list is a typo and is refused rather than quietly excluding nothing.
@@ -46,8 +46,10 @@ export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 
 // pantry row is made of (dry spices, plant sauces and condiments, real sugar, the bowl's sweet
 // flavourings), so a plan can leave those out too. No item carries them.
 export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy',
-  'spice', 'sauce', 'sugar', 'sweet'];
+  'spice', 'sauce', 'sugar', 'sweet', 'gluten', 'purine'];
 export const FOOD_TAGS = TAGS.slice(0, 14);
+/* the tags a condition on the health history leaves out; an allow-list plan never counts them against an item (plate_config.CONDITION_TAGS) */
+export const CONDITION_TAGS = ['gluten', 'purine'];
 // The food behind each count the planner keeps. Red meat in this catalog is beef.
 export const COUNT_TAGS = { red_meat_slots: 'beef', fish_slots: 'fish', beans_slots: 'beans' };
 // units a thing is counted in rather than measured: a plate takes out whole ones
@@ -362,6 +364,9 @@ export function loadRegimens(home) {
         throw e;
       }
     }
+    // the plan's own protein floor, grams per pound (Phase 13: vegan 0.6); blank means the estimate's own figure
+    try { reg.protein_per_lb = num(get(r, 'protein_per_lb', '')); }
+    catch (e) { throw new ConfigError(where + ': protein_per_lb must be a number of grams per pound'); }
     out.push(reg);
   }
   return out;
@@ -400,11 +405,13 @@ export function plateFromDiet(diet) {
 /* The config resolved for one home's choices: the stores the profile puts in play, and the
    kitchen, the regimen, the portions, the occasions and the plate diet.csv names. One resolver
    for the page, the plate sizing and the interview's preview; `plate` given overrides the row. */
-export function loadFor(home, profile, diet, plate = null) {
+export function loadFor(home, profile, diet, plate = null, avoidMore = null) {
   const [shop, picks] = choicesFromProfile(profile);
   const [equipment, hands_on] = kitchenFromDiet(diet);
+  // avoidMore: tags left out on top of the person's own (a condition on the health history, Phase 13)
+  const avoid = [...(avoidFromDiet(diet) || []), ...pyIter(avoidMore || []).filter(t => t)];
   return load(home, { shop, picks, equipment, hands_on, regimen: regimenFromDiet(diet), portions: portionsFromDiet(diet),
-    occasions: occasionsFromDiet(diet), plate: plate === null ? plateFromDiet(diet) : plate, avoid: avoidFromDiet(diet) });
+    occasions: occasionsFromDiet(diet), plate: plate === null ? plateFromDiet(diet) : plate, avoid: avoid.length ? avoid : null });
 }
 
 /* The portions in play, from diet.csv's `portions` row: how many adult portions the food is
@@ -427,7 +434,7 @@ export function leavesOut(tags, regimen) {
   for (const t of pyIter(tags)) if (excl.has(t)) bad.add(t);
   if (truthy(req(regimen, 'allows'))) {
     const allow = new Set(pyIter(regimen.allows));
-    for (const t of pyIter(tags)) if (!allow.has(t)) bad.add(t);
+    for (const t of pyIter(tags)) if (!allow.has(t) && !CONDITION_TAGS.includes(t)) bad.add(t);
   }
   return pySorted([...bad]);
 }

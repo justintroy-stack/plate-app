@@ -12,10 +12,10 @@ import { ConfigError, PyValueError, pyRound } from './py.js';
 import { MarkerRegistry } from './markers.js';
 import { CsvStore } from './store.js';
 import { loadProfile } from './policy.js';
-import { loadHistory, appendHistory } from './history.js';
+import { loadHistory, appendHistory, CONDITIONS } from './history.js';
 import { loadExplanations } from './explain.js';
 import { loadBody, loadIntake } from './tracker.js';
-import { buildDiet, checkBody, loadDiet, targetPreview, targetsFromProfile, ESTIMATE_KEYS } from './diet.js';
+import { buildDiet, checkBody, loadDiet, targetPreview, targetsFromProfile, regimenFor, ESTIMATE_KEYS } from './diet.js';
 import { plateFor } from './rotation.js';
 import { ackPlate, appendWeighIn, loadLog, stepPlate, stepped as bodyStepped, undoPlate, summary as bodySummary } from './body.js';
 import { config as plateConfig } from './plate.js';
@@ -121,7 +121,7 @@ export function installApi(home, ctx) {
       return d;
     },
     '/api/history': () => ({ items: loadHistory(home).map(h => ({ date: h.date, category: h.category, item: h.item, status: h.status, detail: h.detail,
-                                                                   affects: h.affects, interval_months: h.interval_months, last_done: h.last_done })),
+                                                                   affects: h.affects, interval_months: h.interval_months, last_done: h.last_done, condition: h.condition })),
                              profile: loadProfile(home), root: '', config_dir: '' }),
     '/api/files': () => {
       const rows = store().load();
@@ -145,7 +145,7 @@ export function installApi(home, ctx) {
       const d = dietOrNull();
       return { body: body.slice(-90), latest: body.length ? body[body.length - 1] : null, intake_days: intake.length, avg28: recent.length ? avg28 : null,
                weigh: weigh(), diet: d ? { targets: d.targets, baseline: d.baseline, calories: d.calories } : null,
-               estimate: targetsFromProfile(loadProfile(home), today(home.now.bind(home))) };
+               estimate: targetsFromProfile(loadProfile(home), today(home.now.bind(home)), regimenFor(home, loadDiet(home))) };
     },
     '/api/exposure': () => ({ error: SECOND_PASS }),
     '/api/associations': () => ({ error: SECOND_PASS }),
@@ -236,7 +236,7 @@ export function installApi(home, ctx) {
       for (const key of Object.keys(profile)) writeProfile(home, key, profile[key]);
       let estimate = null, sized = null;
       if (Object.keys(profile).length) {
-        estimate = targetsFromProfile(loadProfile(home), today(home.now.bind(home)));
+        estimate = targetsFromProfile(loadProfile(home), today(home.now.bind(home)), regimenFor(home, loadDiet(home)));
         if (!estimate.missing.length) {
           for (const key of ESTIMATE_KEYS) pc.setDiet(home, key, pc.numstr(estimate[key]));
           /* the plate, from the day's target as the plan will read it, against the plan just
@@ -324,8 +324,10 @@ export function installApi(home, ctx) {
     '/api/history': async (q, init) => {
       const body = await bodyJson(init);
       if (!String(body.item || '').trim()) return [{ error: 'item is required' }, 400];
+      const cond = String(body.condition || '').trim().toLowerCase();
+      if (cond && !CONDITIONS.includes(cond)) return [{ error: 'condition must be one of ' + CONDITIONS.join(', ') }, 400];
       const row = {};
-      for (const k of ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done']) row[k] = body[k] == null ? '' : body[k];
+      for (const k of ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done', 'condition']) row[k] = body[k] == null ? '' : body[k];
       appendHistory(home, row);
       await flush(home);
       return { ok: true };

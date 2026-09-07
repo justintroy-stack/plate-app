@@ -9,7 +9,9 @@ import { isDigit, lower, orEmpty, pyD, pyInt, strip } from './py.js';
 import { addMonths } from './pydate.js';
 import { pyDate, unpackInts3 } from './pyx.js';
 
-export const COLUMNS = ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done'];
+export const COLUMNS = ['date', 'category', 'item', 'status', 'detail', 'affects', 'interval_months', 'last_done', 'condition'];
+/* what a fact can be marked as, so the food rules can read it (history.py's CONDITIONS) */
+export const CONDITIONS = ['celiac', 'gout', 'hypertension', 'diabetes', 'kidney'];
 
 /* HistoryItem.touches: the affects list matched case-insensitively, either way round. */
 export function touches(item, name) {
@@ -34,6 +36,7 @@ export function loadHistory(home) {
       affects: orEmpty(r.affects).split(',').join('|').split('|').map(a => a.trim()).filter(a => a),
       interval_months: isDigit(iv) ? pyInt(iv) : null,
       last_done: strip(r.last_done),                              // YYYY-MM-DD for monitoring rows
+      condition: lower(strip(orEmpty(r.condition))),              // one of CONDITIONS, or blank
     });
   }
   return out;
@@ -45,6 +48,14 @@ export function appendHistory(home, row) {
   const isNew = !home.exists(p);
   const rec = {};
   for (const c of COLUMNS) rec[c] = row[c] === undefined ? '' : row[c];
+  if (!isNew) {
+    /* a file from before the condition column grows it here, every row kept (history.py's append_history) */
+    const head = home.read(p).split(/\r?\n/)[0].split(',').map(h => h.trim());
+    if (!head.includes('condition')) {
+      const kept = readRows(home.read(p)).map(r => { const o = {}; for (const c of COLUMNS) o[c] = r[c] === undefined || r[c] === null ? '' : r[c]; return o; });
+      home.write(p, formatDicts(COLUMNS, kept));
+    }
+  }
   const text = isNew ? formatDicts(COLUMNS, [rec]) : formatRow(COLUMNS.map(c => rec[c]));
   home.write(p, (isNew ? '' : home.read(p)) + text);
 }
