@@ -219,10 +219,10 @@ export function buildPlan(cfg, diet, order = null) {
     const leaving = truthy(get(old_m, 'excluded'));
     const why = leaving ? [] : pyIter(get(diet, 'adjustments') || []).filter(a => truthy(get(a, 'changed'))
       && COUNT_KEYS.some(([key, cls]) => has(changed, cls) && get(a, 'target') === key));
-    // a swap the plan asked for waits for the ingredient the plan leaves out, not the meat the
-    // kept plates still use (rotation.py); a food never bought never holds a plate in place
-    const exi = get(old_m, 'excluded_items') || [];
-    const gate = leaving ? (exi.length ? exi[0] : null) : get(old_m, 'protein_item');
+    // a swap the labs ask for waits for the meat the old plate was eating; a swap the plan, a
+    // chip or a condition asks for is a "won't eat", not a "eat less of", so it lands at the
+    // next load instead of waiting on stock the person already decided not to eat (rotation.py)
+    const gate = leaving ? null : get(old_m, 'protein_item');
     const item = truthy(gate) ? get(cfg.items, gate) : null;
     swaps.push({ key: old + '>' + nu, slot: pos, from: old, to: nu,
       from_name: old_m.name, to_name: new_m.name,

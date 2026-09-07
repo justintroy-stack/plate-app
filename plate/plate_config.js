@@ -31,6 +31,10 @@ export const DIET_KEYS = ['equipment', 'hands_on_minutes', 'regimen', 'avoid', '
 // and the plate: one factor per household that scales every recipe, and the date it last changed
 export const TARGET_ROWS = ['kcal', 'protein_g', 'fiber_g', 'sat_fat_g', 'added_sugar_g', 'deficit_kcal'];
 export const DIET_EDITABLE = ['regimen', 'avoid', 'portions', 'occasions', 'equipment', 'hands_on_minutes', 'plate', 'plate_since', 'plate_prev', 'plate_prev_since', ...TARGET_ROWS];
+// A diet.csv row that can change what a day of the plan comes to at scale 1, so the plate needs
+// sizing again once it is written (plate.resize). Portions is not one: Who eats multiplies what
+// a meal buys and uses, never the calorie or protein target a day is judged against.
+export const RESIZE_KEYS = ['regimen', 'avoid', 'occasions', 'equipment', 'hands_on_minutes'];
 // The plate factor's bounds and step. Outside them a plan cannot be scaled that far: a recipe
 // written for one adult does not survive being cut below half or grown past 140 percent.
 export const PLATE_MIN = 0.5, PLATE_MAX = 1.4, PLATE_STEP = 0.05;

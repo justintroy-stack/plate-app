@@ -15,7 +15,7 @@ import { loadDiet, buildDiet } from './diet.js';
 import { MarkerRegistry } from './markers.js';
 import { CsvStore } from './store.js';
 import * as pc from './plate_config.js';
-import { buildPlan, normalizeOrder, groupNote } from './rotation.js';
+import { buildPlan, normalizeOrder, groupNote, plateFor } from './rotation.js';
 import { stepped } from './body.js';
 import { loadBody } from './tracker.js';
 
@@ -29,6 +29,23 @@ export const LOG_COLUMNS = ['logged_at', 'cursor', 'meal_index', 'meal_id', 'mea
    diet.csv describes, for the regimen it names and for the portions it is cooked for. */
 export function config(home, plate = null, avoidMore = null) {
   return pc.loadFor(home, loadProfile(home), loadDiet(home), plate, avoidMore);
+}
+
+/* The plate, sized again for the day this config now describes (plate.py's resize): a plan, a
+   chip, an occasion, the kitchen or a condition on the history can change what a day of the
+   plan comes to at scale 1, so the same plate factor stops meaning the same calories. `diet` is
+   the just-built targets (buildDiet), never the stale diet.csv guess, since only it carries
+   conditionAvoid and the target kcal a fresh switch is judged against. null when the targets
+   are not known yet, or the plate does not need to move. */
+export function resize(home, diet, onDate) {
+  const kcal = diet && diet.targets && diet.targets.kcal;
+  if (!kcal) return null;
+  const cfg = config(home, 1, (diet && diet.condition_avoid) || null);
+  const sized = plateFor(cfg, kcal);
+  if (sized.plate === pc.plateFromDiet(loadDiet(home))) return null;
+  pc.setDiet(home, 'plate', pc.numstr(sized.plate));
+  pc.setDiet(home, 'plate_since', onDate);
+  return sized;
 }
 
 /* The rotation as the phone last mirrored it (meal ids by position), or null. */

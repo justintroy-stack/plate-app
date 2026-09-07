@@ -21,7 +21,7 @@ import { ackPlate, appendWeighIn, loadLog, stepPlate, stepped as bodyStepped, un
 import { config as plateConfig } from './plate.js';
 import { today } from './pydate.js';
 import { buildSummary, buildTrend, buildPlan, suggestedDraw } from './planner.js';
-import { payload, payloadBuilt, getState, setState, recordEvents, tally } from './plate.js';
+import { payload, payloadBuilt, getState, setState, recordEvents, tally, resize } from './plate.js';
 import * as pc from './plate_config.js';
 import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
 import { readPdf, configure } from './pdftext.js';
@@ -92,6 +92,10 @@ export function installApi(home, ctx) {
   const registry = () => MarkerRegistry.load(home);
   const store = () => new CsvStore(home);
   const dietOrNull = () => { try { return buildDiet(home, store(), registry()); } catch (e) { return null; } };
+  /* { ok: true }, with the plate plate.resize sized to when it moved one -- omitted, not null,
+     so a save that could not have changed the day (kcal, portions) still replies the one way
+     it always has (server.py's _resize_reply) */
+  const resizeReply = (sized) => (sized != null ? { ok: true, plate: sized } : { ok: true });
   const weigh = () => bodySummary(loadBody(home), loadDiet(home), loadProfile(home), loadLog(home), today(home.now.bind(home)), home);
   /* the scale's step applies itself at a weigh-in and Tonight says so with Undo (server.py's _auto_step) */
   const autoStep = () => {
@@ -208,8 +212,11 @@ export function installApi(home, ctx) {
       const key = String(body.key || '').trim(), value = String(body.value || '').trim();
       if (!pc.DIET_EDITABLE.includes(key)) return [{ error: 'that setting is not editable here' }, 400];
       pc.setDiet(home, key, value);
+      /* what this key changed can change what a day of the plan comes to, so the plate is
+         sized again to the same target (server.py's /api/diet) */
+      const sized = pc.RESIZE_KEYS.includes(key) ? resize(home, dietOrNull(), today(home.now.bind(home))) : null;
       await flush(home);
-      return { ok: true };
+      return resizeReply(sized);
     },
     '/api/target': async (q, init) => {
       /* About you, before anything is written: the estimate for a set of answers, from the
@@ -326,8 +333,11 @@ export function installApi(home, ctx) {
       const body = await bodyJson(init);
       if (body.remove) {
         try { removeHistory(home, parseInt(body.index, 10)); } catch (e) { return [{ error: String(e && e.message || e) }, 400]; }
+        /* a condition removed can put food back that a condition excluded, changing the day
+           the plate was sized for */
+        const sized = resize(home, dietOrNull(), today(home.now.bind(home)));
         await flush(home);
-        return { ok: true };
+        return resizeReply(sized);
       }
       if (!String(body.item || '').trim()) return [{ error: 'item is required' }, 400];
       const cond = String(body.condition || '').trim().toLowerCase();
@@ -346,8 +356,10 @@ export function installApi(home, ctx) {
       } else {
         appendHistory(home, row);
       }
+      // a condition added or changed can leave food out, changing the day the plate was sized for
+      const sized = resize(home, dietOrNull(), today(home.now.bind(home)));
       await flush(home);
-      return { ok: true };
+      return resizeReply(sized);
     },
     '/api/profile': async (q, init) => {
       const body = await bodyJson(init);
