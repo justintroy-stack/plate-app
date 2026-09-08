@@ -1926,8 +1926,12 @@ function whyCard(F,opt){
   opt=opt||{};
   let h='<section class="card card--tint'+(opt.cls?' '+opt.cls:'')+'" data-family="plum"><span class="t-label">'+esc(opt.label||'Why the rotation looks like this')+'</span>';
   const left=(PLAN&&PLAN.unplaced)||[], short=(PLAN&&PLAN.unmet)||[];
+  /* nothing to move: the targets are the labs' only once a report is on file; before that they
+     are the plan's own counts, and no screen may say a marker did anything (Phase 17) */
   if(!SWAPS.length&&!left.length&&!short.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">The rotation already matches every '+
-    'target your labs ask for'+(REG?', and every meal in it is on the '+esc(planName())+' plan':'')+(planStays()?', which keeps dinner as it is whatever a report says.':'. Nothing in it was moved by a marker.')+'</p></section>';
+    (LABS.draws?'target your labs ask for'+(REG?', and every meal in it is on the '+esc(planName())+' plan':'')
+      :'count '+(REG?'the '+esc(planName())+' plan':'your rotation')+' asks for'+(REG?', and every meal in it is on the plan':''))+
+    (planStays()?', which keeps dinner as it is whatever a report says.':LABS.draws?'. Nothing in it was moved by a marker.':'. No report is on file yet, so no marker has moved it.')+'</p></section>';
   SWAPS.forEach(sw=>{
     const pending=S.pending[sw.key]!=null&&S.pending[sw.key]>0, landed=S.applied&&S.applied.includes(sw.key), flip=F.flips[sw.key];
     const moves=list(Object.entries(sw.changes||{}).map(([c,v])=>(CLASSWORD[c]||c)+' nights '+v[0]+' to '+v[1]));
@@ -1958,6 +1962,7 @@ function whyCard(F,opt){
 /* whose card this is on Tonight: the markers', the plan's, or both. A swap with no rule behind
    it is the plan's own count, so it is how you eat, never a marker. */
 function whyLabel(){const marker=s=>!(s.excluded||[]).length&&(s.why||[]).length>0;
+  if(!SWAPS.length)return LABS.draws?'From your markers':'From how you eat';   /* nothing moved: the markers' card only once a report is on file */
   const r=SWAPS.some(s=>!marker(s)),m=SWAPS.some(marker);return r&&m?'From how you eat and your markers':r?'From how you eat':'From your markers';}
 
 function viewRotation(F){
