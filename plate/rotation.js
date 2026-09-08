@@ -191,7 +191,12 @@ export function buildPlan(cfg, diet, order = null) {
       const m = getStr(meals, mid);
       if (!truthy(m)) return;
       const leaving = truthy(get(m, 'excluded'));         // the regimen leaves it out: any pool meal may take the slot
-      if (!leaving && !over.some(cls => klass(m, cls))) return;
+      const inOver = over.some(cls => klass(m, cls));
+      // a slot in no tracked class at all (poultry, pork, egg...) is never over anything, so the
+      // loop above never touched it; while a class is still under target that slot is a
+      // candidate too, the same way an over-classed one already is
+      const noClass = ![...COUNT_CLASSES].some(cls => klass(m, cls));
+      if (!leaving && !inOver && !(noClass && under.length)) return;
       pool.forEach((cand, cand_i) => {
         if (cand.id === mid) return;
         if (!leaving) {

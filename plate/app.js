@@ -1891,8 +1891,8 @@ function rotRow(F,i){
 function whyCard(F,opt){
   opt=opt||{};
   let h='<section class="card card--tint'+(opt.cls?' '+opt.cls:'')+'" data-family="plum"><span class="t-label">'+esc(opt.label||'Why the rotation looks like this')+'</span>';
-  const left=(PLAN&&PLAN.unplaced)||[];
-  if(!SWAPS.length&&!left.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">The rotation already matches every '+
+  const left=(PLAN&&PLAN.unplaced)||[], short=(PLAN&&PLAN.unmet)||[];
+  if(!SWAPS.length&&!left.length&&!short.length)return h+'<p class="t-body" style="margin-top:var(--s2);color:var(--ink)">The rotation already matches every '+
     'target your labs ask for'+(REG?', and every meal in it is on the '+esc(planName())+' plan':'')+(planStays()?', which keeps dinner as it is whatever a report says.':'. Nothing in it was moved by a marker.')+'</p></section>';
   SWAPS.forEach(sw=>{
     const pending=S.pending[sw.key]!=null&&S.pending[sw.key]>0, landed=S.applied&&S.applied.includes(sw.key), flip=F.flips[sw.key];
@@ -1912,6 +1912,10 @@ function whyCard(F,opt){
   });
   if(left.length)h+='<p class="t-note" style="margin-top:var(--s3)">'+left.length+' meal'+(left.length===1?' is':'s are')+(left.every(u=>(u.excluded||[]).length&&(u.excluded||[]).every(t=>CAVOID.includes(t)))?' left out by a condition on your history':REG?' not on the '+esc(planName())+' plan':' have what you leave out')+' and nothing in the catalog can replace '+(left.length===1?'it':'them')+': '+
     esc([...new Set(left.map(u=>u.name))].join(', '))+'. '+(left.length===1?'It stays':'They stay')+' until a meal that fits is added.</p>';
+  /* the search stopped with a count still short: not an unfinished swap, a genuine wall (no
+     meal in the catalog reaches it without breaking another count), said once it is settled */
+  if(short.length)h+='<p class="t-note" style="margin-top:var(--s3)">'+short.map(u=>(CLASSWORD[u.key]||u.key)+' nights: '+u.reached+' of its own '+u.goal+' reached').join('; ')+
+    '. Nothing left in the catalog trades for more without breaking another count.</p>';
   return h+'</section>';
 }
 /* whose card this is on Tonight: the markers', the plan's, or both */
