@@ -16,12 +16,10 @@ import { loadHistory, appendHistory, updateHistory, removeHistory, CONDITIONS } 
 import { loadExplanations } from './explain.js';
 import { loadBody, loadIntake } from './tracker.js';
 import { buildDiet, checkBody, loadDiet, targetPreview, targetsFromProfile, regimenFor, ESTIMATE_KEYS } from './diet.js';
-import { plateFor } from './rotation.js';
 import { ackPlate, appendWeighIn, loadLog, stepPlate, stepped as bodyStepped, undoPlate, summary as bodySummary } from './body.js';
-import { config as plateConfig } from './plate.js';
 import { today } from './pydate.js';
 import { buildSummary, buildTrend, buildPlan, suggestedDraw } from './planner.js';
-import { payload, payloadBuilt, getState, setState, recordEvents, tally, resize } from './plate.js';
+import { payload, payloadBuilt, getState, storeState, currentOrder, recordEvents, tally, resize, sizeFor } from './plate.js';
 import * as pc from './plate_config.js';
 import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
 import { readPdf, configure } from './pdftext.js';
@@ -87,11 +85,16 @@ async function pdfjs() {
   return pdfjsMod;
 }
 
+/* The food targets when they can be built, null when they cannot (server.py's _diet_or_none). */
+export function dietOrNullOf(home) {
+  try { return buildDiet(home, new CsvStore(home), MarkerRegistry.load(home)); } catch (e) { return null; }
+}
+
 export function installApi(home, ctx) {
   const realFetch = window.fetch.bind(window);
   const registry = () => MarkerRegistry.load(home);
   const store = () => new CsvStore(home);
-  const dietOrNull = () => { try { return buildDiet(home, store(), registry()); } catch (e) { return null; } };
+  const dietOrNull = () => dietOrNullOf(home);
   /* { ok: true }, with the plate plate.resize sized to when it moved one -- omitted, not null,
      so a save that could not have changed the day (kcal, portions) still replies the one way
      it always has (server.py's _resize_reply) */
@@ -180,9 +183,13 @@ export function installApi(home, ctx) {
       const body = await bodyJson(init);
       const key = q.get('key') || '';
       if (!key || typeof body.value !== 'string') return [{ error: 'key and a string value are required' }, 400];
-      const [stored, winner] = setState(home, key, body.value);
+      /* the rotation the state carries is what the plate is sized against, so a save whose
+         order moved (a swap landed) sizes it again and says so (server.py's /api/plate/state) */
+      const [stored, winner, sized] = storeState(home, key, body.value, dietOrNull, today(home.now.bind(home)));
       await flush(home);
-      return { ok: true, stored, value: winner };
+      const reply = { ok: true, stored, value: winner };
+      if (sized != null) reply.plate = sized;
+      return reply;
     },
     '/api/stores': async (q, init) => {
       const body = await bodyJson(init);
@@ -222,7 +229,7 @@ export function installApi(home, ctx) {
       /* About you, before anything is written: the estimate for a set of answers, from the
          same function the save writes with (server.py's /api/target) */
       const body = await bodyJson(init);
-      return targetPreview(home, body.profile || {}, body.diet || {}, today(home.now.bind(home)));
+      return targetPreview(home, body.profile || {}, body.diet || {}, today(home.now.bind(home)), currentOrder(home));
     },
     '/api/setup': async (q, init) => {
       /* first run, and Your target under Profile: every answer checked before any is written,
@@ -247,11 +254,12 @@ export function installApi(home, ctx) {
         estimate = targetsFromProfile(loadProfile(home), today(home.now.bind(home)), regimenFor(home, loadDiet(home)));
         if (!estimate.missing.length) {
           for (const key of ESTIMATE_KEYS) pc.setDiet(home, key, pc.numstr(estimate[key]));
-          /* the plate, from the day's target as the plan will read it, against the plan just
-             chosen at scale 1; the weigh-in window restarts */
+          /* the plate, from the day's target as the plan will read it, against the rotation the
+             device holds, or the plan just chosen where it holds none, at scale 1 (sizeFor);
+             the weigh-in window restarts */
           const d = dietOrNull();
           const kcal = (d && d.targets && d.targets.kcal) || estimate.kcal;
-          sized = plateFor(plateConfig(home, 1), kcal);
+          sized = sizeFor(home, d, kcal);
           pc.setDiet(home, 'plate', pc.numstr(sized.plate));
           pc.setDiet(home, 'plate_since', today(home.now.bind(home)));
         }

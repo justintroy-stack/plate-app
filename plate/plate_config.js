@@ -54,11 +54,13 @@ export const OCCASION_COLUMNS = ['id', 'name', 'portions', 'share', 'rotation', 
 // pantry row is made of (dry spices, plant sauces and condiments, real sugar, the bowl's sweet
 // flavourings), so a plan can leave those out too. No item carries them.
 export const TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish', 'dairy', 'egg', 'beans', 'grain', 'potato', 'fruit', 'nuts', 'vegetable', 'soy', 'gluten',
-  'spice', 'sauce', 'sugar', 'sweet', 'purine', 'vegetarian', 'vegan'];
+  'spice', 'sauce', 'sugar', 'sweet', 'purine', 'vegetarian', 'vegan', 'substitute'];
 export const FOOD_TAGS = TAGS.slice(0, 15);
 // A meal's own composition, derived from its ingredients, not a chip: no meat or fish at all
-// (vegetarian), and within that, no dairy or egg either (vegan). Phase 14.
-export const PLANT_TAGS = ['vegetarian', 'vegan'];
+// (vegetarian), and within that, no dairy or egg either (vegan). Phase 14. Beside those two, an
+// item that stands in for meat (substitute: tofu, tempeh), which a plan that keeps meat leaves
+// out of its pools; an allow-list plan reads soy before it. Phase 17.
+export const PLANT_TAGS = ['vegetarian', 'vegan', 'substitute'];
 export const MEAT_FISH_TAGS = ['beef', 'pork', 'poultry', 'fish', 'shellfish'];
 export const DAIRY_EGG_TAGS = ['dairy', 'egg'];
 /* the tags a condition on the health history leaves out; an allow-list plan never counts them against an item (plate_config.CONDITION_TAGS) */

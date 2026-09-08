@@ -61,6 +61,10 @@ const LOCAL=!!window.PLATE_LOCAL, WHERE=LOCAL?'on this device':'on the Mac';
    It used to be a floating box with display:none and no announcement at all. */
 /* The docked line is one short line; the full sentence goes to the live region, where length
    costs nothing and a screen reader wants all of it. */
+/* say it now, and again once the page has been fetched again: every save that changes the day
+   reloads 350 ms after its sentence, which no one can read in that time (his report,
+   2026-09-08: "the Save message is extremely quick so I don't know what it actually said") */
+function flash(m){say(m);try{sessionStorage.setItem('lt:flash',m);}catch(e){}}
 function say(m,full){
   const el=document.getElementById('statusline');
   el.textContent=m;el.classList.add('on');
@@ -216,8 +220,20 @@ const kitAt=d=>kitFor(mealAt(d),d);
    leaves out drops now, the same "won't eat" rule a dinner swap follows (rotation.build_plan) --
    not held back by whatever is still on the shelf, which Kitchen names as stranded instead. */
 function liveOpts(sl){const o=sl.opts.filter(x=>!(x.excluded&&x.excluded.length));return o.length?o:null;}
-function slotAt(sl,d){const opts=liveOpts(sl);if(!opts)return null;const o=(S.off[sl.id]||0);return opts[(S.cursor+d+o)%opts.length];}
-function coldAt(d,occ){const out=[];SLOTS.forEach(sl=>{if(occ&&(sl.occasion||ROT)!==occ)return;const o=slotAt(sl,d);if(o)out.push({id:sl.id,name:sl.name,occ:sl.occasion||ROT,...o});});return out;}
+/* One slot's option on day d, and the cold block of an occasion for that day. A pool never
+   repeats an item another pool of the same occasion already picked that day (his report,
+   2026-09-08: breakfast's main and its side both banana and peanut butter): each slot skips, in
+   its own turn order, any option sharing an item with what was picked before it, and keeps its
+   natural pick only when every option collides. With nothing in common the pick is the one it
+   always was, and the cycle button still turns it. `taken` is the set of item keys the earlier
+   slots of the occasion hold; the engine's own tests call slotAt without one. */
+function slotAt(sl,d,taken){const opts=liveOpts(sl);if(!opts)return null;const n=opts.length,start=(((S.cursor+d)%n)+n)%n;
+  const ring=[];for(let i=0;i<n;i++)ring.push(opts[(start+i)%n]);
+  const kept=taken&&taken.size?ring.filter(o=>!Object.keys(o.uses||{}).some(k=>taken.has(k))):ring;
+  const pool=kept.length?kept:ring;return pool[(S.off[sl.id]||0)%pool.length];}
+function coldAt(d,occ){const out=[],taken={};SLOTS.forEach(sl=>{const so=sl.occasion||ROT;if(occ&&so!==occ)return;
+  const t=taken[so]||(taken[so]=new Set());const o=slotAt(sl,d,t);if(!o)return;
+  Object.keys(o.uses||{}).forEach(k=>t.add(k));out.push({id:sl.id,name:sl.name,occ:so,...o});});return out;}
 const activeMeal=()=>planB&&PLANB?PLANB:mealAt(0);
 function coldTot(d,occ){const c=coldAt(d,occ);return{c:c.reduce((a,x)=>a+x.kcal,0),p:c.reduce((a,x)=>a+x.protein_g,0)};}
 
@@ -381,8 +397,9 @@ function extraOptions(prevDay){
 /* the running total of what was also had, for one cursor: kcal and protein for the items that
    carry figures, and how many did not (a home whose items carry none counts them in stock, not
    on the day, and the day line says so rather than pretending they were zero) */
+function extrasFor(cur){return (S.extras||[]).filter(x=>x.cursor===cur);}
 function extrasTotal(cur){
-  const ex=(S.extras||[]).filter(x=>x.cursor===cur);
+  const ex=extrasFor(cur);
   const priced=ex.filter(x=>x.kcal!=null);
   return {kcal:priced.reduce((a,x)=>a+x.kcal,0),protein_g:priced.reduce((a,x)=>a+x.protein_g,0),count:ex.length,unpriced:ex.length-priced.length};
 }
@@ -399,9 +416,10 @@ const singular=n=>/oes$/.test(n)?n.slice(0,-2):/s$/.test(n)?n.slice(0,-1):n;
 function amtRow(k){const it=I[k],v=XAMT[k]||0,priced=it.kcal!=null&&it.protein_g!=null,u=it.unit||'',have=S.inv[k]||0;
   const per=priced?Math.round(it.kcal)+' kcal '+((!u||u==='each')?'each':'per '+unitOf(k,1).trim()):'no figures on this home';
   const meta=have>0?(fmt(have)+' '+unitOf(k,have)).trim()+' on hand · '+per:'your plan keeps this · '+per;
+  /* the amount set sits under the name, never beside it: a value column squeezed a long name
+     into a few characters once an amount was set (his report, 2026-09-08) */
   return '<div class="row"><span class="row__body"><span class="row__title">'+esc(it.name)+'</span>'+
-    '<span class="row__meta">'+esc(meta)+'</span></span>'+
-    '<span class="row__val">'+(v>0?esc(amtLabel(k,v)):'')+'</span>'+
+    '<span class="row__meta">'+esc(meta)+'</span>'+(v>0?'<span class="row__note">Set: '+esc(amtLabel(k,v))+'</span>':'')+'</span>'+
     '<span class="step2"><button class="iconbtn" type="button" data-fk="xamt-less:'+esc(k)+'" onclick="act.extraAmt(\''+esc(k)+'\',-1)" aria-label="Less '+esc(it.name)+'">'+icon('minus')+'</button>'+
     '<button class="iconbtn" type="button" data-fk="xamt-more:'+esc(k)+'" onclick="act.extraAmt(\''+esc(k)+'\',1)" aria-label="More '+esc(it.name)+'">'+icon('plus')+'</button></span></div>';}
 function amtLabel(k,v){const it=I[k];if(!it)return '';const u=it.unit||'',name=it.name.toLowerCase();
@@ -453,6 +471,7 @@ let XAMT={};                            /* the amounts set on the Also had picke
 let EXTRAAT=null;                       /* which cursor what gets logged counts against: the day still on Tonight, or the one just finished */
 let EXTRAOCC=null;                      /* which of today's occasions it was beside, on a home with more than one */
 let XFMSG='';                           /* Something else's own error, if the name or a number is missing or bad */
+let HMSG='';                            /* the Add a fact form's own message, under its button (Phase 17) */
 let TRIP={};                            /* a trip being planned, per store: the meals it covers */
 
 window.act={
@@ -568,7 +587,7 @@ window.act={
    if(!file){MSG='Choose a backup file first.';render();return;}
    MSG='Restoring '+file.name+'…';render();
    try{const r=await api('/api/restore',{method:'POST',body:await file.arrayBuffer()});
-     MSG='';say('Restored '+r.files+' files. Reloading.');setTimeout(()=>location.reload(),600);}
+     MSG='';flash('Restored '+r.files+' files. Reloading.');setTimeout(()=>location.reload(),600);}
    catch(e){MSG=e.message;render();}},
  async saveProfile(){
    const g=id=>document.getElementById(id);
@@ -593,7 +612,7 @@ window.act={
    try{
      await post('stores',P.shop.join('|'));
      await post('store_picks',Object.keys(P.picks).map(k=>k+':'+P.picks[k]).join('|'));
-     SMSG='';say('Saved. Rebuilding the lists.');
+     SMSG='';flash('Saved. Rebuilding the lists.');
      setTimeout(()=>location.reload(),350);
    }catch(e){SMSG=e.message;render();}},
  regimenPick(v){RSEL=v;RMSG='';render();},
@@ -619,7 +638,7 @@ window.act={
           household happens to be right now. Blank but it DID have an override: post empty to
           clear it. Anything typed: post it. */
        if(v||o.portions_own!=null)await post('/api/occasions',{id:o.id,value:v});}
-     returnTo({at:'whoeats'});say('Saved. Rebuilding the lists.');setTimeout(()=>location.reload(),350);
+     returnTo({at:'whoeats'});flash('Saved. Rebuilding the lists.');setTimeout(()=>location.reload(),350);
    }catch(e){PMSG=e.message;render();}},
  /* First run: every answer in one post, checked before any is written (/api/setup), then the
     page fetched again with the rotation built for those answers. "Set up" is remembered in the
@@ -641,7 +660,7 @@ window.act={
         the planner would swap every one. An empty order is what loadState reads as "the
         baseline", and after the reload the baseline is the chosen plan's own rotation. */
      S.order=[];S.setup=true;S.guide=true;await store.set('plate:v8',JSON.stringify(S));
-     say('Building your rotation.');setTimeout(()=>location.reload(),350);
+     flash('Building your rotation.');setTimeout(()=>location.reload(),350);
    }catch(e){FRMSG=e.message;render();}},
  /* About you: a typed value is kept, and the host is asked for the estimate once the card is
     complete. The line is written into the page directly, never through a redraw, so the caret
@@ -666,7 +685,7 @@ window.act={
     by the plate; Got it keeps the plate and drops the line. */
  async undoPlate(){
    try{await api('/api/plate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({undo:true})});
-     say('Plates back as they were.');setTimeout(()=>location.reload(),350);}
+     flash('Plates back as they were.');setTimeout(()=>location.reload(),350);}
    catch(e){say(e.message);}},
  async ackPlate(){
    try{await api('/api/plate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ack:true})});
@@ -679,7 +698,7 @@ window.act={
    const w=g('wIn')?g('wIn').value.trim():'', d=g('wDate')?g('wDate').value.trim():'';
    if(!w){MSG='Type your weight first.';render();return;}
    try{const r=await api('/api/weigh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weight_lb:w,date:d})});
-     if(r.stepped){returnTo({tab:'markers',mk:'body',at:'platecard'});say('Weighed in. The scale stepped the plate: about 5 percent '+(r.stepped.step<0?'smaller':'larger')+' from the next cook.');setTimeout(()=>location.reload(),600);return;}
+     if(r.stepped){returnTo({tab:'markers',mk:'body',at:'platecard'});flash('Weighed in. The scale stepped the plate: about 5 percent '+(r.stepped.step<0?'smaller':'larger')+' from the next cook.');setTimeout(()=>location.reload(),600);return;}
      BODY=null;MSG='';say('Weighed in: '+r.point.weight_lb+' lb, trend '+r.point.trend_lb+'.');}
    catch(e){MSG=e.message;}
    render();},
@@ -689,7 +708,7 @@ window.act={
    const miss=bodyMissing();
    if(miss.length){TMSG='Still needed: '+list(miss.map(k=>BODYLABEL[k]||k))+'.';render();return;}
    try{await api('/api/setup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({profile:bodyProfile()})});
-     returnTo({at:'yourtarget'});say('Saved. Rebuilding the rotation.');setTimeout(()=>location.reload(),350);}
+     returnTo({at:'yourtarget'});flash('Saved. Rebuilding the rotation.');setTimeout(()=>location.reload(),350);}
    catch(e){TMSG=e.message;render();}},
  /* Your kitchen and When you eat under Profile: the first-run answers, changed the way the
     other pickers are, one row at a time, then the page fetched again. */
@@ -698,12 +717,12 @@ window.act={
    const eq=CFG.equipment_catalog.filter(e=>{const el=g('yk-eq-'+e);return el&&el.checked;}).join('|');
    if(!eq){KMSG='Tick at least one thing to cook on.';render();return;}
    try{await post('equipment',eq);const r=await post('hands_on_minutes',g('yk-time').value);
-     returnTo({at:'yourkitchen'});say('Saved. Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);
+     returnTo({at:'yourkitchen'});flash('Saved. Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);
    }catch(e){KMSG=e.message;render();}},
  async saveOccasions(){const g=id=>document.getElementById(id);
    const on=(CFG.occasion_catalog||[]).map(o=>o.id).filter(k=>{const el=g('yo-occ-'+k);return el&&el.checked;}).join('|');
    try{const r=await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'occasions',value:on})});
-     returnTo({at:'whenyoueat'});say('Saved. Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);
+     returnTo({at:'whenyoueat'});flash('Saved. Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);
    }catch(e){OMSG=e.message;render();}},
  /* the plan is resolved on the Mac and rides inside the page, so a saved choice fetches the
     page again, as the store picker does */
@@ -715,7 +734,7 @@ window.act={
    const v=sel?sel.value:(RSEL==null?(REG?REG.id:''):RSEL), av=ticked('rg-avoid-',CHIP_TAGS).join('|');
    try{let r=await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'regimen',value:v})});
      if(av!==AVOID_OWN.join('|'))r=await api('/api/diet',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:'avoid',value:av})});
-     returnTo({at:'regimen'});say('Saved. Dinners change from the next cook. Anything you own that this plan leaves out is on Kitchen.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
+     returnTo({at:'regimen'});flash('Saved. Dinners change from the next cook. Anything you own that this plan leaves out is on Kitchen.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
    catch(e){RMSG=e.message;render();}},
  sed(k,v){SED[k]=v;},
  snew(k,v){SNEW[k]=v;},
@@ -727,7 +746,7 @@ window.act={
  async storeSave(){
    if(!SEDIT.name.trim()){SEDIT.msg='Give the store a name.';render();return;}
    try{await api('/api/stores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:SEDIT.key,name:SEDIT.name,kind:SEDIT.kind,threshold:SEDIT.threshold,cadence:SEDIT.cadence,countdown:!!(STORES[SEDIT.key]||{}).countdown})});
-     returnTo({at:'stores'});say(SEDIT.name.trim()+' saved.');setTimeout(()=>location.reload(),350);}
+     returnTo({at:'stores'});flash(SEDIT.name.trim()+' saved.');setTimeout(()=>location.reload(),350);}
    catch(e){SEDIT.msg=e.message;render();}},
  edItem(k){SED={item:k,store:'',pack:'',buy:'',msg:''};render();},
  edRow(sk){const o=(I[SED.item]&&I[SED.item].offers||{})[sk];if(!o)return;SED.store=sk;SED.pack=String(o.pack);SED.buy=o.buy||'';SED.msg='';render();},
@@ -735,46 +754,46 @@ window.act={
    if(!SED.item){SED.msg='Pick an item first.';render();return;}
    if(!SED.store){SED.msg='Pick a store.';render();return;}
    try{await api('/api/store_items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:SED.store,item:SED.item,pack:SED.pack,buy:SED.buy})});
-     returnTo({item:SED.item});say('Saved. Rebuilding the lists.');setTimeout(()=>location.reload(),350);}
+     returnTo({item:SED.item});flash('Saved. Rebuilding the lists.');setTimeout(()=>location.reload(),350);}
    catch(e){SED.msg=e.message;render();}},
  async removeRow(sk,k){
    try{await api('/api/store_items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({store:sk,item:k,remove:true})});
-     returnTo({item:k});say('Removed. Rebuilding the lists.');setTimeout(()=>location.reload(),350);}
+     returnTo({item:k});flash('Removed. Rebuilding the lists.');setTimeout(()=>location.reload(),350);}
    catch(e){SED.msg=e.message;render();}},
  async addStore(){
    if(!SNEW.name.trim()){SNEW.msg='Give the store a name.';render();return;}
    try{const r=await api('/api/stores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:SNEW.name,threshold:SNEW.threshold,cadence:SNEW.cadence,countdown:SNEW.countdown,kind:SNEW.kind})});
-     returnTo({store:r.key});say(SNEW.name.trim()+' added.');setTimeout(()=>location.reload(),350);}
+     returnTo({store:r.key});flash(SNEW.name.trim()+' added.');setTimeout(()=>location.reload(),350);}
    catch(e){SNEW.msg=e.message;render();}},
  async removeStore(sk){
    try{await api('/api/stores',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:sk,remove:true})});
-     returnTo({});say(STORES[sk].name+' removed.');setTimeout(()=>location.reload(),350);}
+     returnTo({});flash(STORES[sk].name+' removed.');setTimeout(()=>location.reload(),350);}
    catch(e){SMSG=e.message;render();}},
+ /* A fact added, changed or removed fetches the page again, whatever the reply: a condition can
+    leave food out of the pools and the rotation without moving the plate, and only a fresh
+    config carries that (his report, 2026-09-08: celiac added under You, Kitchen still listing
+    pasta and oats until a reload -- the item Phase 13 opened). The one field a fact cannot do
+    without is said under the button that was tapped, with the field focused, not on a card
+    above the form. */
  async addHist(){
    const g=id=>{const e=document.getElementById(id);return e?e.value:'';};
    const obj={item:g('hItem'),category:g('hCat'),status:g('hStatus'),date:g('hDate'),affects:g('hAff'),
      interval_months:g('hInt'),last_done:g('hLast'),detail:g('hDetail'),condition:g('hCond'),protein_limit_g:g('hCond')==='kidney'?g('hLimit'):''};
-   if(!obj.item){MSG='Give the fact a name.';render();return;}
+   if(!obj.item){HMSG='Give the fact a name: Item is required.';render();say(HMSG);const e=document.getElementById('hItem');if(e)e.focus();return;}
    if(HEDIT!=null)obj.index=HEDIT;
    try{const r=await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});
-     HIST=null;DRAW=null;MSG='';const was=HEDIT!=null;HEDIT=null;
-     if(r.plate){say((was?'Saved.':'Added.')+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);return;}
-     say(was?'Saved.':'Added.');}
-   catch(e){MSG=e.message;}
-   render();},
+     returnTo({at:'hist-form'});flash((HEDIT!=null?'Saved.':'Added.')+' Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
+   catch(e){HMSG=e.message;render();}},
  /* reopens Add a fact pre-filled, saving as a change to this row instead of a new one -- the
     same shape storeEdit already gives a store under Kitchen */
- editHist(i){HEDIT=i;HDEL=null;MSG='';SCROLLTO='hist-form';render();},
- cancelHistEdit(){HEDIT=null;MSG='';render();},
+ editHist(i){HEDIT=i;HDEL=null;MSG='';HMSG='';SCROLLTO='hist-form';render();},
+ cancelHistEdit(){HEDIT=null;MSG='';HMSG='';render();},
  askRemoveHist(i){HDEL=i;render();},
  cancelRemoveHist(){HDEL=null;render();},
  async removeHist(i){
    try{const r=await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,remove:true})});
-     HIST=null;DRAW=null;HDEL=null;if(HEDIT===i)HEDIT=null;
-     if(r.plate){say('Removed.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);return;}
-     say('Removed.');}
-   catch(e){MSG=e.message;}
-   render();},
+     returnTo({at:'hist-form'});flash('Removed. Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
+   catch(e){HMSG=e.message;render();}},
  cycle(id){S.off[id]=(S.off[id]||0)+1;persist();render();},
  cooked(){FLIPSRC='log';ENTER='log';const draw=previewDraw();
    note(planB?'first_planb':'first_log');
@@ -822,7 +841,7 @@ window.act={
    S.last={inv:Object.assign({},S.inv),cursor:cur,checked:S.checked.slice(),order:S.order.slice(),pending:Object.assign({},S.pending),
      gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',occasion:occ,at:at};
    S.extras=(S.extras||[]).filter(x=>x.cursor>=cur-1);
-   S.extras.push({cursor:cur,kcal:o.kcal,protein_g:o.protein_g});
+   S.extras.push({cursor:cur,kcal:o.kcal,protein_g:o.protein_g,label:o.label,occ:occ});
    if(window.plateEvent)window.plateEvent({cursor:cur,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, with '+occWord,at:at});
    const movesStock=Object.keys(o.uses||{}).length>0;
    deduct(o.uses);EXTRA=false;XAMT={};XFMSG='';EXTRAAT=null;EXTRAOCC=null;persist();render();
@@ -1050,6 +1069,14 @@ function noteCard(){
    wrong thing. If anything here throws, the meal is still logged.
    ========================================================================== */
 let LG={t:[],raf:null,on:false};
+/* the plate a landing just resized (lt:resized), held until the ledger has finished, then one
+   reload with its own line carried across (Phase 17) */
+let RESIZED=null;
+function afterResize(){
+  const p=RESIZED;if(!p)return;RESIZED=null;
+  returnTo({tab:tab,mk:MKVIEW,at:null});flash('Plates sized again for what is on your rotation now.'+plateResizeNote(p));
+  setTimeout(()=>location.reload(),350);
+}
 const ZCOL={freezer:'--frost',fridge:'--sprout',pantry:'--clay'};
 const cssVar=n=>(getComputedStyle(document.documentElement).getPropertyValue(n)||'').trim()||'#FFFFFF';
 /* what the log did, for the sheet: each item tonight used, before and after. The plate's own
@@ -1127,6 +1154,7 @@ function ledgerHide(){
   const h=document.getElementById('hero');
   if(h){h.classList.add('settling');h.classList.add('flipin');setTimeout(()=>{h.classList.remove('settling');h.classList.remove('flipin');},1000);}
   setTimeout(guideRefresh,120);
+  afterResize();
 }
 function fxSettle(info){
   if(RM.matches||!info)return;
@@ -1629,31 +1657,37 @@ function viewTonight(F){
   top+=noteCard();
   top+=reportCard();
   if(CFG.plate_step)top+=plateCard(CFG.plate_step);
-  /* the last log was something outside the plan, still today whether Tonight has been cooked
-     yet or not (his ask, Phase 14: Ate it all should not end the chance to add one more thing) */
-  const X=(S.last&&S.last.kind==='extra'&&(S.last.cursor===S.cursor||S.last.cursor===S.cursor-1))?S.last:null;
-  const xRow=x=>'<div class="row"><span class="row__body"><span class="row__title">Also had: '+esc(x.meal)+
-    (x.occasion?', with '+esc(occName(x.occasion).toLowerCase()):'')+'</span>'+
-    '<span class="row__meta">outside the plan · the rotation did not move</span></span>'+
-    '<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button></div>';
-  if(X&&X.cursor===S.cursor&&S.cursor===0){
-    /* nothing has ever been cooked yet: the one row there is to show */
-    top+='<section class="card" style="padding:0 var(--s5) var(--s2)"><div class="rows">'+xRow(X)+'</div></section>';
-  } else if(S.cursor>0){
+  /* everything also had, each with its figures: today's under its own card whether Tonight has
+     been cooked yet or not (his ask, Phase 14: Ate it all should not end the chance to add one
+     more thing), and the day just closed under its Last-logged row. His report, 2026-09-08: only
+     the last entry ever showed, a second replaced the first, Undo blanked the row, and after Ate
+     it all an entry for the current day showed nowhere. Undo sits on the last entry while it is
+     the last thing logged; an entry from before entries carried a name reads as one from stock. */
+  const X=(S.last&&S.last.kind==='extra')?S.last:null;
+  const xRows=cur=>{const ex=extrasFor(cur);return ex.map((x,i)=>{const last=X&&X.cursor===cur&&i===ex.length-1;
+    const figs=x.kcal!=null?Math.round(x.kcal).toLocaleString()+' kcal · '+x.protein_g+' g protein':'no figures, so counted in stock and not on the day';
+    return '<div class="row"><span class="row__body"><span class="row__title">Also had: '+esc(x.label||'something from stock')+(x.occ?', with '+esc(occName(x.occ).toLowerCase()):'')+'</span>'+
+      '<span class="row__meta">'+esc(figs)+'</span></span>'+
+      (last?'<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button>':'')+'</div>';}).join('');};
+  const xNote=(cur,inset)=>{const ex=extrasFor(cur);if(!ex.length)return '';
+    return '<p class="t-note" style="'+(inset?'margin:var(--s2) var(--s5) 0':'margin-top:var(--s2)')+'">'+(ex.length>1?esc(logDayLine(cur))+' ':'')+'Outside the plan; the rotation did not move.</p>';};
+  if(extrasFor(S.cursor).length){
+    top+='<section class="card" id="also-had-today"><span class="t-label">Also had today</span><div class="rows" style="margin-top:var(--s1)">'+xRows(S.cursor)+'</div>'+xNote(S.cursor,false)+'</section>';
+  }
+  if(S.cursor>0){
     /* the last log, and the one way back. No clock on it: the meal log on the Mac keeps the
        real stamp, because that is the record, and this screen is the planner. With no snapshot
        (a log from before undo existed, or a second undo) the kind is a guess, so it says
        "assumed"; the undo itself says it put the stock back as if the whole plate was eaten.
        Undo only ever undoes the single most recent thing, so it sits on whichever row that is:
-       the extra when one was logged since, the meal itself otherwise. */
+       the last extra when one was logged since, the meal itself otherwise. */
     const L=(S.last&&S.last.cursor===S.cursor-1&&S.last.kind!=='extra')?S.last:null, pm=L?L:{meal:mealAt(-1).name,kind:'full'};
     const how=pm.kind==='partial'?'In part':pm.kind==='plan_b'?'As Plan B':'Ate it all';
     top+='<section class="card" style="padding:0 var(--s5) var(--s2)"><div class="rows"><div class="row">'+
       '<span class="row__body"><span class="row__title">Last logged: '+esc(pm.meal)+'</span>'+
       '<span class="row__meta">'+how+(L?'':' · assumed')+'</span></span>'+
       (X?'':'<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button>')+'</div>'+
-      (X&&X.cursor===S.cursor-1?xRow(X):'')+'</div>'+
-      (extrasTotal(S.cursor-1).count?'<p class="t-note" style="margin:var(--s2) var(--s5) 0">'+esc(logDayLine(S.cursor-1))+'</p>':'')+
+      xRows(S.cursor-1)+'</div>'+xNote(S.cursor-1,true)+
       '<div class="btnrow" style="margin:var(--s3) var(--s5) 0"><button class="btn" type="button" data-fk="extraprev" onclick="act.openExtra(true)">Also had</button></div></section>';
   }
 
@@ -1814,7 +1848,7 @@ const PROTWORD={red_meat:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellf
 const famOf=m=>PROTFAM[m.protein_class]||'sprout';
 /* The food-group note under the rotation: one group that lands three or more times on a night
    whatever the cold block draws. The engine counts it in both twins; the page only says it. */
-const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',gluten:'gluten',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings',purine:'purine-rich food',vegetarian:'a plant-only dinner',vegan:'a vegan dinner'};
+const TAGWORD={beef:'beef',pork:'pork',poultry:'poultry',fish:'fish',shellfish:'shellfish',dairy:'dairy',egg:'eggs',beans:'beans',grain:'grain',potato:'potato',fruit:'fruit',nuts:'nuts',vegetable:'vegetables',soy:'soy',gluten:'gluten',spice:'dry spices',sauce:'sauces and condiments',sugar:'sugar',sweet:'sweet flavourings',purine:'purine-rich food',vegetarian:'a plant-only dinner',vegan:'a vegan dinner',substitute:'a meat substitute'};
 const tagWords=ts=>list((ts||[]).map(t=>TAGWORD[t]||t));
 const NUMWORD=['no','one','two','three','four','five','six','seven','eight','nine'];
 function groupLine(g){
@@ -1899,9 +1933,12 @@ function whyCard(F,opt){
     const moves=list(Object.entries(sw.changes||{}).map(([c,v])=>(CLASSWORD[c]||c)+' nights '+v[0]+' to '+v[1]));
     const rules=[...new Set((sw.why||[]).map(a=>a&&(a.display||a.rule)).filter(Boolean))];
     const leaving=(sw.excluded||[]).length>0, mk=leaving?null:(sw.why||[]).map(a=>a&&a.marker).filter(Boolean)[0];
-    /* a swap the plan asked for says so in its own words and points at no marker */
+    /* a swap the plan asked for says so in its own words and points at no marker; a count the
+       plan itself sets is the plan asking, never the markers (his report, 2026-09-08: a fresh
+       home with no report on file read "Your markers ask for") */
     h+='<p class="t-body" style="margin-top:var(--s2);color:var(--ink)"><b>'+esc(sw.from_name)+' becomes '+esc(sw.to_name)+'.</b> '+
-      (leaving?esc(notOn(sw)):'Your markers ask for '+esc(moves)+'.'+(rules.length?' The rule that fired: '+esc(rules.join(', '))+'.':''))+'</p>'+
+      (leaving?esc(notOn(sw)):(rules.length?'Your markers ask for ':REG?'The '+esc(planName())+' plan asks for ':'Your rotation\'s own counts ask for ')+esc(moves)+'.'+
+        (rules.length?' The rule that fired: '+esc(rules.join(', '))+'.':''))+'</p>'+
       '<p class="t-note" style="margin-top:var(--s2)">'+(landed?'This one has landed.'
         :pending?'Nothing changes until the '+esc(sw.gate_name||'stock')+' you already own is eaten: '+(Math.round(S.pending[sw.key]*10)/10)+' '+esc(sw.gate_unit||'')+' left'+
           (flip!=null?', about '+flip+' meal'+(flip===1?'':'s')+' from now':'')+'.'
@@ -1918,8 +1955,10 @@ function whyCard(F,opt){
     '. Nothing left in the catalog trades for more without breaking another count.</p>';
   return h+'</section>';
 }
-/* whose card this is on Tonight: the markers', the plan's, or both */
-function whyLabel(){const r=SWAPS.some(s=>(s.excluded||[]).length),m=SWAPS.some(s=>!(s.excluded||[]).length);return r&&m?'From how you eat and your markers':r?'From how you eat':'From your markers';}
+/* whose card this is on Tonight: the markers', the plan's, or both. A swap with no rule behind
+   it is the plan's own count, so it is how you eat, never a marker. */
+function whyLabel(){const marker=s=>!(s.excluded||[]).length&&(s.why||[]).length>0;
+  const r=SWAPS.some(s=>!marker(s)),m=SWAPS.some(marker);return r&&m?'From how you eat and your markers':r?'From how you eat':'From your markers';}
 
 function viewRotation(F){
   const cur=S.cursor+1, pos=S.cursor%N, cyc=Math.floor(S.cursor/N)+1, after=N-pos-1;
@@ -3077,7 +3116,7 @@ function viewProfile(){
   aside+='<section class="card" data-family="plum"><div class="split"><span class="t-label">Health history</span><span class="mono" style="color:var(--ink-3)">'+(h0.items||[]).length+' facts</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them. A fact marked as a condition pulls one lever the food rules already have, and the row says which.</p><div class="rows">';
   (h0.items||[]).forEach((x,i)=>{
-    const lever=x.condition?(x.condition==='kidney'&&x.protein_limit_g?'a kidney condition: your limit on file, '+fmt(x.protein_limit_g)+' g':esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||'')):'';
+    const lever=x.condition?(x.condition==='kidney'&&x.protein_limit_g?'a kidney condition: nothing moves here; your limit on file, '+fmt(x.protein_limit_g)+' g a day, shown beside your protein target':esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||'')):'';
     aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
     ((x.affects||[]).length?' · touches '+esc(x.affects.join(', ')):'')+(x.interval_months?' · every '+x.interval_months+' mo':'')+(x.last_done?', last '+esc(x.last_done):'')+
     (lever?' · '+lever:'')+'</span>'+
@@ -3091,7 +3130,7 @@ function viewProfile(){
   const hEd=HEDIT!=null?(h0.items||[])[HEDIT]:null;
   const hSel=(id,v)=>(hEd&&hEd[id]===v)?' selected':'';
   aside+='<section class="card" id="hist-form"><span class="t-label">'+(hEd?'Edit a fact':'Add a fact')+'</span><div class="formgrid" style="margin-top:var(--s3)">'+
-    '<div class="field wide"><span>Item</span><input id="hItem" data-fk="hitem" placeholder="e.g. Imaging: echocardiogram finding" value="'+esc(hEd?hEd.item:'')+'"></div>'+
+    '<div class="field wide"><span>Item · required</span><input id="hItem" data-fk="hitem" required placeholder="e.g. Imaging: echocardiogram finding" value="'+esc(hEd?hEd.item:'')+'"></div>'+
     '<div class="field"><span>Category</span><select id="hCat" data-fk="hcat"><option'+hSel('category','diagnosis')+'>diagnosis</option><option'+hSel('category','imaging')+'>imaging</option><option'+hSel('category','therapy')+'>therapy</option><option'+hSel('category','monitoring')+'>monitoring</option><option'+hSel('category','note')+'>note</option></select></div>'+
     '<div class="field"><span>Status</span><select id="hStatus" data-fk="hstatus"><option'+hSel('status','active')+'>active</option><option'+hSel('status','resolved')+'>resolved</option><option'+hSel('status','superseded')+'>superseded</option><option'+hSel('status','confirm')+'>confirm</option></select></div>'+
     '<div class="field"><span>Date, free text</span><input id="hDate" data-fk="hdate" placeholder="2026-02 or ~2024" value="'+esc(hEd?hEd.date:'')+'"></div>'+
@@ -3105,7 +3144,7 @@ function viewProfile(){
     '<button class="btn btn--ink" type="button" data-fk="hadd" onclick="act.addHist()">'+(hEd?'Save':'Add')+'</button>'+
     (hEd?'<button class="btn" type="button" data-fk="hcancel" onclick="act.cancelHistEdit()">Cancel</button>':'')+
     '</div></div></div>'+
-    (MSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(MSG)+'</p>':'')+'</section>';
+    (HMSG?'<p class="t-note" id="hist-msg" style="margin-top:var(--s3)">'+esc(HMSG)+'</p>':'')+'</section>';
   aside+=storyCard();
   return '<div class="stack stack--top"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
@@ -3394,6 +3433,14 @@ document.addEventListener('lt:remote',e=>{
   render();
   say(S.cursor>wasCursor?'Meal logged on your other device.':'Updated from your other device.');
 });
+/* A swap landed on this device and the plate was sized again for the rotation it now holds
+   (plate.store_state, said by the storage shim on the save's own reply): every scaled quantity
+   follows at one reload, the way every other resize already reloads -- after the log's ledger
+   has finished, when one is running (ledgerHide). */
+document.addEventListener('lt:resized',e=>{
+  const p=e.detail;if(!p||p.plate===PLATE)return;
+  RESIZED=p;if(!LG.on)afterResize();
+});
 
 (async()=>{
   const v=await store.get('plate:v8');
@@ -3403,6 +3450,10 @@ document.addEventListener('lt:remote',e=>{
   let back=null;try{back=JSON.parse(sessionStorage.getItem('lt:return')||'null');sessionStorage.removeItem('lt:return');}catch(e){}
   if(back&&S.init){tab=back.tab||tab;MKVIEW=back.mk||MKVIEW;if(back.item&&I[back.item])SED.item=back.item;if(back.store&&STORES[back.store])SED.store=back.store;}
   render();
+  /* what a save said before it fetched the page again, said here where it can be read: the
+     reload came 350 ms after the words, a tenth of the time they stay up (flash) */
+  let fl=null;try{fl=sessionStorage.getItem('lt:flash');sessionStorage.removeItem('lt:flash');}catch(e){}
+  if(fl)say(fl);
   /* a home that logged meals before the passport existed reads its stamps from the meal log:
      once when the state has no passport, and again while it is empty with meals logged, so a
      read that failed (no signal, the Mac asleep) is not the passport's last word */

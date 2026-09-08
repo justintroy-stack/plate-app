@@ -15,7 +15,7 @@ import { loadDiet, buildDiet } from './diet.js';
 import { MarkerRegistry } from './markers.js';
 import { CsvStore } from './store.js';
 import * as pc from './plate_config.js';
-import { buildPlan, normalizeOrder, groupNote, plateFor } from './rotation.js';
+import { buildPlan, normalizeOrder, groupNote, plateFor, landedOrder } from './rotation.js';
 import { stepped } from './body.js';
 import { loadBody } from './tracker.js';
 
@@ -37,26 +37,44 @@ export function config(home, plate = null, avoidMore = null) {
    the just-built targets (buildDiet), never the stale diet.csv guess, since only it carries
    conditionAvoid and the target kcal a fresh switch is judged against. null when the targets
    are not known yet, or the plate does not need to move. */
-export function resize(home, diet, onDate) {
+export function resize(home, diet, onDate, order = null, inv = null) {
   const kcal = diet && diet.targets && diet.targets.kcal;
   if (!kcal) return null;
-  const cfg = config(home, 1, (diet && diet.condition_avoid) || null);
-  const sized = plateFor(cfg, kcal);
+  const sized = sizeFor(home, diet, kcal, order, inv);
   if (sized.plate === pc.plateFromDiet(loadDiet(home))) return null;
   pc.setDiet(home, 'plate', pc.numstr(sized.plate));
   pc.setDiet(home, 'plate_since', onDate);
   return sized;
 }
 
+/* The plate that makes a day of the plan meet `kcal`, at scale 1, sized against the rotation as
+   the device will hold it after its next load (landedOrder: the order and the stock the phone
+   last mirrored, `order` and `inv` when given, with every swap that waits on nothing taken),
+   never against the plan's baseline alone (plate.size_for, Phase 17). */
+export function sizeFor(home, diet, kcal, order = null, inv = null) {
+  const cfg = config(home, 1, (diet && diet.condition_avoid) || null);
+  if (order == null) order = currentOrder(home);
+  if (inv == null) inv = currentInv(home);
+  return plateFor(cfg, kcal, landedOrder(cfg, diet, order, inv));
+}
+
+/* One field of a stored state (order, inv), or null (plate.state_field). */
+export function stateField(raw, name) {
+  if (!raw) return null;
+  let s;
+  try { s = JSON.parse(raw); } catch (e) { return null; }
+  if (s === null || typeof s !== 'object' || Array.isArray(s)) return null;
+  return s[name] === undefined ? null : s[name];
+}
+
 /* The rotation as the phone last mirrored it (meal ids by position), or null. */
 export function currentOrder(home) {
-  const raw = getState(home, STATE_KEY);
-  if (!raw) return null;
-  try {
-    const s = JSON.parse(raw);
-    if (s === null || typeof s !== 'object' || Array.isArray(s)) return null;
-    return s.order === undefined ? null : s.order;
-  } catch (e) { return null; }
+  return stateField(getState(home, STATE_KEY), 'order');
+}
+
+/* The stock as the phone last mirrored it (quantity by item), or null. */
+export function currentInv(home) {
+  return stateField(getState(home, STATE_KEY), 'inv');
 }
 
 /* Everything the page needs: the config plus, when the food targets are known, the plan that
@@ -142,6 +160,31 @@ export function setState(home, key, value) {
   home.write(STATE_PATH, JSON.stringify(all, null, 1));
   logIfMealLogged(home, oldRaw, value);
   return [true, value];
+}
+
+/* setState, then the plate sized again when the rotation the state carries moved: the order on
+   the device is what the plate is sized against, so a swap landing there -- the stock it waited
+   on gone, or a "won't eat" at the next load -- moves the plate the way a plan switch does, and
+   the reply says so for the page to load again once. `diet` may be a function, called only once
+   the order has moved, since a tick or a log stores the state far more often than a swap lands.
+   Returns [stored, winner, sized], sized null when the plate did not need to move
+   (plate.store_state, Phase 17). */
+export function storeState(home, key, value, diet = null, onDate = null) {
+  const before = key === STATE_KEY ? stateField(getState(home, key), 'order') : null;
+  const [stored, winner] = setState(home, key, value);
+  if (!stored || key !== STATE_KEY || pySame(stateField(winner, 'order'), before)) return [stored, winner, null];
+  const d = typeof diet === 'function' ? diet() : diet;
+  return [stored, winner, resize(home, d, onDate, stateField(winner, 'order'), stateField(winner, 'inv'))];
+}
+
+/* Python's == on the JSON values a state carries: lists by element, else by value. */
+function pySame(a, b) {
+  if (Array.isArray(a) && Array.isArray(b)) return a.length === b.length && a.every((v, i) => pySame(v, b[i]));
+  if (a !== null && b !== null && typeof a === 'object' && typeof b === 'object' && !Array.isArray(a) && !Array.isArray(b)) {
+    const ka = Object.keys(a), kb = Object.keys(b);
+    return ka.length === kb.length && ka.every(k => k in b && pySame(a[k], b[k]));
+  }
+  return a === b;
 }
 
 // ---- meal log

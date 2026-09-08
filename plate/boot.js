@@ -12,8 +12,9 @@ import { loadHome, flush, persist } from './fs.js';
 import { DEFAULTS, SHIPPED, PERSONAL, LINEAGE } from './defaults.js';
 import { syncCatalog } from './seeds.js';
 import { BUILD } from './build.js';
-import { installApi } from './api.js';
-import { payloadBuilt, getState, setState, recordEvents } from './plate.js';
+import { installApi, dietOrNullOf } from './api.js';
+import { payloadBuilt, getState, storeState, recordEvents } from './plate.js';
+import { today } from './pydate.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,8 +75,12 @@ function loadScript(src) {
     },
     async set(k, v) {
       try {
-        setState(home, k, stamp(v));
+        /* the rotation the state carries is what the plate is sized against: a save whose order
+           moved (a swap landed) sizes it again, and the page says so and loads again once, the
+           way the server's storage shim does on the same reply (storeState) */
+        const [, , sized] = storeState(home, k, stamp(v), () => dietOrNullOf(home), today(home.now.bind(home)));
         await flush(home);
+        if (sized) document.dispatchEvent(new CustomEvent('lt:resized', { detail: sized }));
         return true;
       } catch (e) { console.error(e); return false; }
     },

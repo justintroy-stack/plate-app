@@ -86,12 +86,15 @@ export function occasionEstimate(cfg, occ) {
 }
 
 /* What a day of every occasion in play delivers per person, at the plate the config was loaded
-   for: the rotation occasion's plate with its cold block, plus each other occasion's pools. */
-export function dayEstimate(cfg) {
+   for: the rotation occasion's plate with its cold block, plus each other occasion's pools. From
+   `order` -- the rotation as the device holds it, normalized here -- when given, else from the
+   plan's own baseline rotation (rotation.day_estimate, Phase 17). */
+export function dayEstimate(cfg, order = null) {
   const meals = mealIndex(cfg);
+  const hot = order != null ? normalizeOrder(order, cfg) : cfg.baseline;
   const total = {};
   for (const occ of cfg.occasions) {
-    const est = occ.rotation ? estimate(cfg.baseline, cfg, meals, occ) : occasionEstimate(cfg, occ);
+    const est = occ.rotation ? estimate(hot, cfg, meals, occ) : occasionEstimate(cfg, occ);
     for (const [k, v] of Object.entries(est)) total[k] = pyRound((has(total, k) ? total[k] : 0) + v, 1);
   }
   return total;
@@ -136,10 +139,11 @@ export const PLATE_MIN = 0.5, PLATE_MAX = 1.4;
 /* The plate factor that makes a day of the plan, cooked as written, meet a calorie target: the
    target over the day's estimate at scale 1, to the nearest 0.05, held inside PLATE_MIN and the
    ceiling cfg carries (cfg.plate_max: PLATE_MAX on a multi-meal day, higher on a one-meal day,
-   since the whole target then rides on this one plate). `cfg` must be loaded at plate 1. A twin
-   of rotation.plate_for, rounding as Python does. */
-export function plateFor(cfg, kcal) {
-  const day = dayEstimate(cfg);
+   since the whole target then rides on this one plate). `cfg` must be loaded at plate 1. `order`:
+   the rotation the day is estimated from, the baseline when null. A twin of rotation.plate_for,
+   rounding as Python does. */
+export function plateFor(cfg, kcal, order = null) {
+  const day = dayEstimate(cfg, order);
   const base = (has(day, 'kcal') && day.kcal) ? day.kcal : 0;
   if (!base || !kcal) return { plate: 1, day_kcal: base, ratio: null, clamped: false, plate_kcal: base };
   const ratio = Number(kcal) / base;
@@ -263,6 +267,22 @@ export function buildPlan(cfg, diet, order = null) {
     estimate: { current: estimate(current, cfg, meals, rot), target: estimate(work, cfg, meals, rot) },
     targets: tk, day_targets: day, occasions,
     lens: get(diet, 'lens', ''), regimen };
+}
+
+/* The rotation as the device will hold it after its next load: `order` (the rotation as the
+   phone holds it now; the plan's baseline when it holds none), with every swap of the plan built
+   against it that waits on nothing already taken -- what the page's own applyDue does the moment
+   it opens. A swap waits on nothing when it is a "won't eat" (no gate item) or when the stock it
+   would wait on is not there (`inv`, the device's own stock by item; none at all when unknown).
+   What the plate is sized against (rotation.landed_order, Phase 17). */
+export function landedOrder(cfg, diet, order = null, inv = null) {
+  const work = normalizeOrder(order, cfg);
+  if (!truthy(diet)) return work;
+  for (const s of buildPlan(cfg, diet, work).swaps) {
+    const gate = s.gate_item;
+    if (gate == null || !truthy(get(inv == null ? {} : inv, gate))) work[s.slot] = s.to;
+  }
+  return work;
 }
 
 /* Plain lines for the CLI and for anyone reading the plan without the page. */

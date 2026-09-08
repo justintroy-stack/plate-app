@@ -148,7 +148,9 @@ export function targetsFromProfile(prof, today, regimen = null) {
 /* What About you would set, before anything is written: each answer checked the way the save
    checks it, then the estimate. `answers` are the interview's other choices, unused here and
    read by the plate sizing beside it. */
-export function targetPreview(home, profile, answers, today) {
+/* `order`: the rotation the device holds, so the line shown sizes the same day the save sizes
+   (diet.target_preview, Phase 17); the plan's baseline when it holds none. */
+export function targetPreview(home, profile, answers, today, order = null) {
   const prof = {};
   for (const [key, value] of Object.entries(profile || {})) prof[strip(key)] = checkBody(strip(key), value);
   const diet = loadDiet(home);
@@ -161,7 +163,7 @@ export function targetPreview(home, profile, answers, today) {
     /* one figure sizes the plate and is the figure the line says: the body's estimate (diet.py's target_preview) */
     const kcal = pyFloat(String(estimate.kcal));
     out.kcal = kcal;
-    out.plate = plateFor(loadFor(home, loadProfile(home), diet, 1), kcal);
+    out.plate = plateFor(loadFor(home, loadProfile(home), diet, 1), kcal, order);
   }
   return out;
 }
