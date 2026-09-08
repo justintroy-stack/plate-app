@@ -68,7 +68,8 @@ function flash(m){say(m);try{sessionStorage.setItem('lt:flash',m);}catch(e){}}
 function say(m,full){
   const el=document.getElementById('statusline');
   el.textContent=m;el.classList.add('on');
-  clearTimeout(window._tt);window._tt=setTimeout(()=>el.classList.remove('on'),4200);
+  /* up for as long as it takes to read: a short line 4.2 s, a long one up to 10 s */
+  clearTimeout(window._tt);window._tt=setTimeout(()=>el.classList.remove('on'),Math.min(10000,4200+Math.max(0,m.length-60)*45));
   /* A swap that landed during this render is the more important sentence, so it rides along
      rather than being overwritten by the routine one. */
   const spoken=(full||m)+(FLIPSAY?' '+FLIPSAY:'');
@@ -105,6 +106,10 @@ const AVOID_OWN=AVOID.filter(t=>!CAVOID.includes(t));               /* the perso
 const HCOND=[['celiac','celiac disease'],['gout','gout'],['hypertension','high blood pressure'],['diabetes','diabetes or prediabetes'],['kidney','a kidney condition']];
 const HLEVER={celiac:'gluten out',gout:'purine-rich food out, red meat nights capped at 2',hypertension:'the fat cap and the fibre floor',diabetes:'the sugar cap and the fibre floor',kidney:'nothing moves here; protein is your kidney doctor\'s number'};
 const condWord=id=>{const c=HCOND.find(x=>x[0]===id);return c?c[1]:id;};
+/* what a fact's save did, in the lever's own words, for the sentence after Add or Save (his
+   report, 2026-09-08: "Saved. Rebuilding the lists." for a kidney number) */
+const condSaid=(id,limit)=>{if(!id)return '';const w=condWord(id).replace(/^\w/,c=>c.toUpperCase());
+  return ' '+w+': '+(id==='kidney'&&limit?'your limit of '+fmt(Number(limit))+' g is on file beside your protein.':(HLEVER[id]||'')+'.');};
 /* When you eat: the occasions, and the one that carries the recipe. One cursor tick is one
    eating cycle, every occasion once, so the rotation still advances by one meal per log. */
 const OCC=CFG.occasions||[{id:'dinner',name:'Dinner',rotation:true}], ROT=(OCC.find(o=>o.rotation)||OCC[0]).id;
@@ -290,6 +295,16 @@ function applyDue(){
 }
 function setInv(k,v){const before={...S.inv};S.inv[k]=Math.max(0,Math.round(v*100)/100);noteDepletion(before);}
 function deduct(draw){const before={...S.inv};for(const k in draw)S.inv[k]=Math.max(0,Math.round(((S.inv[k]||0)-draw[k])*100)/100);noteDepletion(before);}
+/* the stock an Also-had entry actually took, put back (Phase 18): on the shelf, and on every
+   gate it ate down by the same amount, the rail's own scale never left below what is pending;
+   `bag` is shaped like S -- the state itself, or the undo snapshot, which is stale by the same
+   amounts once an older entry is removed */
+function giveBack(bag,took){
+  for(const k in took){bag.inv[k]=Math.round(((bag.inv[k]||0)+took[k])*100)/100;
+    for(const key in (bag.pending||{})){const sw=SWAP[key];if(!sw||sw.gate_item!==k)continue;
+      bag.pending[key]=Math.round((bag.pending[key]+took[k])*100)/100;
+      if(bag.gate0&&bag.gate0[key]!=null&&bag.gate0[key]<bag.pending[key])bag.gate0[key]=bag.pending[key];}}
+}
 
 /* ---- forecast: a forward simulation over the next 120 meals, with pending swaps
    flipping where their stock runs out. Nothing here is stored. */
@@ -782,7 +797,7 @@ window.act={
    if(!obj.item){HMSG='Give the fact a name: Item is required.';render();say(HMSG);const e=document.getElementById('hItem');if(e)e.focus();return;}
    if(HEDIT!=null)obj.index=HEDIT;
    try{const r=await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});
-     returnTo({at:'hist-form'});flash((HEDIT!=null?'Saved.':'Added.')+' Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
+     returnTo({at:'hist-form'});flash((HEDIT!=null?'Saved.':'Added.')+condSaid(obj.condition,obj.protein_limit_g)+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
    catch(e){HMSG=e.message;render();}},
  /* reopens Add a fact pre-filled, saving as a change to this row instead of a new one -- the
     same shape storeEdit already gives a store under Kitchen */
@@ -791,8 +806,9 @@ window.act={
  askRemoveHist(i){HDEL=i;render();},
  cancelRemoveHist(){HDEL=null;render();},
  async removeHist(i){
+   const row=(HIST&&HIST.items&&HIST.items[i])||{};
    try{const r=await api('/api/history',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({index:i,remove:true})});
-     returnTo({at:'hist-form'});flash('Removed. Rebuilding the lists.'+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
+     returnTo({at:'hist-form'});flash('Removed.'+(row.condition?' '+condWord(row.condition).replace(/^\w/,c=>c.toUpperCase())+' no longer moves anything.':'')+plateResizeNote(r.plate));setTimeout(()=>location.reload(),350);}
    catch(e){HMSG=e.message;render();}},
  cycle(id){S.off[id]=(S.off[id]||0)+1;persist();render();},
  cooked(){FLIPSRC='log';ENTER='log';const draw=previewDraw();
@@ -841,11 +857,35 @@ window.act={
    S.last={inv:Object.assign({},S.inv),cursor:cur,checked:S.checked.slice(),order:S.order.slice(),pending:Object.assign({},S.pending),
      gate0:Object.assign({},S.gate0),applied:S.applied.slice(),meal:o.label,meal_id:'extra',kind:'extra',occasion:occ,at:at};
    S.extras=(S.extras||[]).filter(x=>x.cursor>=cur-1);
-   S.extras.push({cursor:cur,kcal:o.kcal,protein_g:o.protein_g,label:o.label,occ:occ});
+   const entry={cursor:cur,kcal:o.kcal,protein_g:o.protein_g,label:o.label,occ:occ,at:at,uses:{}};
+   S.extras.push(entry);
    if(window.plateEvent)window.plateEvent({cursor:cur,meal_id:'extra',meal:o.label,kcal:o.kcal,protein_g:o.protein_g,kind:'extra',note:'also had, with '+occWord,at:at});
    const movesStock=Object.keys(o.uses||{}).length>0;
-   deduct(o.uses);EXTRA=false;XAMT={};XFMSG='';EXTRAAT=null;EXTRAOCC=null;persist();render();
+   /* the entry keeps what actually left stock, item by item, never what was asked: a preset is
+      not capped at what is on hand and deduct floors at nothing, so Remove (Phase 18) gives
+      back exactly this and never makes stock out of nothing; a swap that lands on it is noted */
+   const before={...S.inv}, f0=FLIPS.length;
+   deduct(o.uses);
+   for(const k in (o.uses||{})){const d=Math.round(((before[k]||0)-(S.inv[k]||0))*100)/100;if(d>0)entry.uses[k]=d;}
+   if(FLIPS.length>f0)entry.landed=FLIPS.slice(f0).map(s=>s.key);
+   EXTRA=false;XAMT={};XFMSG='';EXTRAAT=null;EXTRAOCC=null;persist();render();
    say('Also had '+o.label+', with '+occWord+'. '+(movesStock?'Stock updated.':'Counted on the day; nothing tracked to take from stock.'));},
+ /* Any Also-had entry can be taken back, not only the newest (his report, 2026-09-08: two
+    logged, the first wrong, no way back; and a new day's entry took the previous day's way
+    back). The stock it actually took goes back on the shelf and on the gate it ate down, its
+    row leaves the day and the log on the Mac (undo_extra, by stamp and label), and the undo
+    snapshot is patched by the same amounts, so the newest entry's Undo, and a meal's, stay
+    exact. The newest entry is the one-step undo itself. A swap that landed on its stock stays
+    landed: a landing is only ever reversed by Undo or Start over. */
+ removeExtra(at){
+   const i=(S.extras||[]).findIndex(x=>x.at===at);if(i<0)return;const x=S.extras[i];
+   if(S.last&&S.last.kind==='extra'&&S.last.at===at){window.act.undoLog();return;}
+   giveBack(S,x.uses||{});if(S.last)giveBack(S.last,x.uses||{});
+   S.extras.splice(i,1);
+   if(window.plateEvent)window.plateEvent({cursor:x.cursor,meal_id:'extra',meal:x.label,kind:'undo_extra',note:'removed by the user',at:x.at});
+   persist();render();
+   const took=Object.keys(x.uses||{}).length>0;
+   say('Removed. '+x.label+(took?' is back in stock.':' is off the day.')+(x.landed&&x.landed.length?' The swap that landed on it stays.':''));},
  /* the amount of one item tonight's plate takes: stepped in the item's own step, never below
     nothing, kept until the log that takes it */
  used(k,d){const m=activeMeal();if(USED.cursor!==S.cursor||USED.meal!==m.id)USED={cursor:S.cursor,meal:m.id,amt:{}};
@@ -1619,10 +1659,12 @@ function dayLine(m){
   const dt=(PLAN&&PLAN.day_targets)||{}, tgt=dt.kcal?', against your '+Math.round(dt.kcal).toLocaleString()+' a day':'';
   const also=ex.count?' Also had so far today: '+(ex.kcal||ex.protein_g?'about '+ex.kcal.toLocaleString()+' kcal and '+ex.protein_g+' g protein, counted in above':'not priced, counted in stock and not on the day')+
     (ex.unpriced&&(ex.kcal||ex.protein_g)?' (except '+ex.unpriced+' item'+(ex.unpriced===1?'':'s')+' this home carries no figures for)':'')+'.':'';
-  const kc2=CONDS.find(c=>c.id==='kidney'&&c.protein_limit_g), klim=kc2?' Your kidney limit on file: '+fmt(kc2.protein_limit_g)+' g.':'';
+  /* a kidney limit on file sits beside the day's protein, where a person reads it, not as a
+     last sentence after everything else (his report, 2026-09-08: "where does the 60 show?") */
+  const kc2=CONDS.find(c=>c.id==='kidney'&&c.protein_limit_g), klim=kc2?' (your kidney limit on file: '+fmt(kc2.protein_limit_g)+' g)':'';
   const sum='about '+kc.toLocaleString()+' kcal and '+pr+' g protein';
-  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', cold block included: ':': ')+sum+tgt+'.'+also+klim;
-  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+tgt+'.'+also+klim;
+  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', cold block included: ':': ')+sum+klim+tgt+'.'+also;
+  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+klim+tgt+'.'+also;
 }
 /* the same running total, for a day already logged: the Last-logged card names every extra
    added since, not just the most recent one xRow shows */
@@ -1662,13 +1704,15 @@ function viewTonight(F){
      more thing), and the day just closed under its Last-logged row. His report, 2026-09-08: only
      the last entry ever showed, a second replaced the first, Undo blanked the row, and after Ate
      it all an entry for the current day showed nowhere. Undo sits on the last entry while it is
-     the last thing logged; an entry from before entries carried a name reads as one from stock. */
+     the last thing logged; every other entry that carries its stamp has its own Remove (Phase
+     18); an entry from before entries carried a name reads as one from stock, with no button. */
   const X=(S.last&&S.last.kind==='extra')?S.last:null;
-  const xRows=cur=>{const ex=extrasFor(cur);return ex.map((x,i)=>{const last=X&&X.cursor===cur&&i===ex.length-1;
+  const xRows=cur=>{const ex=extrasFor(cur);return ex.map((x,i)=>{const last=X&&(x.at?X.at===x.at:(X.cursor===cur&&i===ex.length-1));
     const figs=x.kcal!=null?Math.round(x.kcal).toLocaleString()+' kcal · '+x.protein_g+' g protein':'no figures, so counted in stock and not on the day';
     return '<div class="row"><span class="row__body"><span class="row__title">Also had: '+esc(x.label||'something from stock')+(x.occ?', with '+esc(occName(x.occ).toLowerCase()):'')+'</span>'+
       '<span class="row__meta">'+esc(figs)+'</span></span>'+
-      (last?'<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button>':'')+'</div>';}).join('');};
+      (last?'<button class="btn btn--sm" type="button" data-fk="undolog" onclick="act.undoLog()">Undo</button>'
+        :x.at?'<button class="btn btn--sm" type="button" data-fk="xremove:'+esc(x.at)+'" onclick="act.removeExtra(\''+esc(x.at)+'\')">Remove</button>':'')+'</div>';}).join('');};
   const xNote=(cur,inset)=>{const ex=extrasFor(cur);if(!ex.length)return '';
     return '<p class="t-note" style="'+(inset?'margin:var(--s2) var(--s5) 0':'margin-top:var(--s2)')+'">'+(ex.length>1?esc(logDayLine(cur))+' ':'')+'Outside the plan; the rotation did not move.</p>';};
   if(extrasFor(S.cursor).length){
@@ -2679,10 +2723,15 @@ function viewRegimen(){
     h+='<p class="t-body" id="rg-planline" style="margin-top:var(--s3);color:var(--ink)">'+esc(planLine(r,rav))+'</p>';
     if(planFit(r,rav).length===0)h+='<div class="callout warn" style="margin-top:var(--s3)">No meal in the catalog fits this plan with what you leave out, so the rotation would stand as it is until one is added.</div>';
     else if(gone.length)h+='<p class="t-note" style="margin-top:var(--s2)">'+gone.length+' of your '+N+' rotation nights would change ('+esc(names.join(', '))+'), each once the stock it was eating is gone.</p>';
-    /* what the plan leaves out of the pools, as a count and the groups, never a list of the food
-       itself: a wall of labels a person will not eat is noise, and the rows say the rest */
-    if((r.leaves_out_cold||[]).length){const gone=new Set();SLOTS.forEach(sl=>sl.opts.forEach(o=>leavesOut(o.contains,r).forEach(t=>gone.add(t))));const n=r.leaves_out_cold.length;
-      h+='<p class="t-note" style="margin-top:var(--s2)">From the cold block, '+n+' option'+(n===1?' leaves':'s leave')+': anything with '+esc(tagWords([...gone]))+'.</p>';}
+    /* what the plan and the chips together leave out of the pools, as a count and the groups,
+       never a list of the food itself: a wall of labels a person will not eat is noise, and the
+       rows say the rest. Counted here over every option, both reasons at once: the plan's own
+       count alone fell from 2 to 1 when gluten was ticked, since an option the chip had already
+       removed no longer counted as the plan's, and what the chip removed was said nowhere (his
+       screenshot, 2026-09-08). */
+    {const gone=new Set();let n=0;SLOTS.forEach(sl=>sl.opts.forEach(o=>{const t=leavesOut(o.contains,r), c=(o.contains||[]).filter(x=>rav.includes(x));
+        if(!t.length&&!c.length)return;n++;t.forEach(x=>gone.add(x));c.forEach(x=>gone.add(x));}));
+      if(n)h+='<p class="t-note" style="margin-top:var(--s2)">From the cold block, '+n+' option'+(n===1?' leaves':'s leave')+': anything with '+esc(tagWords([...gone]))+'.</p>';}
   }
   h+='<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="regsave" onclick="act.saveRegimen()">Save</button></div>'+
     (RMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(RMSG)+'</p>':'')+'</section>';
@@ -3121,7 +3170,7 @@ function viewProfile(){
   aside+='<section class="card" data-family="plum"><div class="split"><span class="t-label">Health history</span><span class="mono" style="color:var(--ink-3)">'+(h0.items||[]).length+' facts</span></div>'+
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">One line per fact. The planner shows these beside the panels they touch and never draws a clinical conclusion from them. A fact marked as a condition pulls one lever the food rules already have, and the row says which.</p><div class="rows">';
   (h0.items||[]).forEach((x,i)=>{
-    const lever=x.condition?(x.condition==='kidney'&&x.protein_limit_g?'a kidney condition: nothing moves here; your limit on file, '+fmt(x.protein_limit_g)+' g a day, shown beside your protein target':esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||'')):'';
+    const lever=x.condition?(x.condition==='kidney'&&x.protein_limit_g?'a kidney condition: nothing moves here; your limit on file, '+fmt(x.protein_limit_g)+' g a day, shown beside the day\'s protein on Tonight and beside your protein target under Markers':esc(condWord(x.condition))+': '+esc(HLEVER[x.condition]||'')):'';
     aside+='<div class="row"><span class="row__body"><span class="row__title">'+esc(x.item)+'</span><span class="row__meta">'+esc(x.category)+' · '+esc(x.status)+(x.date?' · '+esc(x.date):'')+
     ((x.affects||[]).length?' · touches '+esc(x.affects.join(', ')):'')+(x.interval_months?' · every '+x.interval_months+' mo':'')+(x.last_done?', last '+esc(x.last_done):'')+
     (lever?' · '+lever:'')+'</span>'+

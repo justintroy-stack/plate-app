@@ -853,7 +853,9 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   min-height:28px;display:flex;align-items:center;padding:5px 20px;margin:0 auto;
   background:var(--ink);color:var(--enamel);font-family:var(--mono);font-size:10.5px;
   letter-spacing:.11em;text-transform:uppercase;opacity:0;transform:translateY(6px);pointer-events:none;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  /* a sentence wraps, up to four lines, and stays up long enough to read (say): a save's own
+     words were one clipped line before (his report, 2026-09-08) */
+  white-space:normal;overflow:hidden;line-height:1.4;text-align:center;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:4;
   transition:opacity .2s var(--ez),transform .2s var(--ez)}
 .statusline.on{opacity:1;transform:none}
 .pressed{transform:scale(.985)}

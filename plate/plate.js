@@ -299,7 +299,12 @@ export function recordEvents(home, events) {
         extras.push({ logged_at: at, cursor: '', meal_index: '', meal_id: 'extra', meal: label,
                       kcal: (kcal == null || kcal === '') ? '' : kcal, protein_g: (pro == null || pro === '') ? '' : pro,
                       kind: 'extra', note: e.note || 'also had, outside the plan' });
-      } else removeExtra(home, at, label);
+      } else {
+        // the row may still be in this very batch (logged and taken back while offline, pushed
+        // together): drop it there first, then from the log on disk
+        for (let j = extras.length - 1; j >= 0; j--) if (extras[j].logged_at === at && extras[j].meal === label) extras.splice(j, 1);
+        removeExtra(home, at, label);
+      }
       continue;
     }
     if (!('cursor' in e)) continue;
