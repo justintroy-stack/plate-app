@@ -977,7 +977,9 @@ window.act={
  guideFind(){if(GTARGET&&GTARGET.scrollIntoView)GTARGET.scrollIntoView({block:'center',behavior:'smooth'});},
  notNow(){if(!S.seen.includes('report_nudge'))S.seen.push('report_nudge');persist();render();},
  closeFlip(){const g=document.getElementById('gate');g.innerHTML='';},
- reset(){S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:S.flav,init:false,pending:{},applied:[],
+ resetAsk(){RSTASK=true;render();},                                     /* first tap: ask, do not act */
+ resetCancel(){RSTASK=false;render();},
+ reset(){RSTASK=false;S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:S.flav,init:false,pending:{},applied:[],
    gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true,tally:{},extras:[]};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
 };
 
@@ -2995,6 +2997,7 @@ let SED={item:'',store:'',pack:'',buy:'',msg:''}, SNEW={name:'',threshold:'',cad
 let SEDIT={key:'',name:'',kind:'grocery',threshold:'',cadence:'',msg:''};   /* a store being changed under Stores, by key */   /* the editor's typed values, kept across a redraw */
 let HEDIT=null;                         /* a history row being changed, by position -- reopens Add a fact pre-filled */
 let HDEL=null;                          /* a history row asking to be removed, by position, until confirmed or backed out of */
+let RSTASK=false;                       /* the rotation restart, asked and awaiting a confirm on the You tab */
 /* A save fetches the page again, because the catalog is resolved on the Mac and rides inside
    it; this remembers where he was so the reload lands him back on the editor. */
 function returnTo(extra){try{sessionStorage.setItem('lt:return',JSON.stringify(Object.assign({tab:'you',mk:'overview',at:'sed'},extra||{})));}catch(e){}}
@@ -3199,11 +3202,18 @@ function viewProfile(){
     '</div></div></div>'+
     (HMSG?'<p class="t-note" id="hist-msg" style="margin-top:var(--s3)">'+esc(HMSG)+'</p>':'')+'</section>';
   aside+=storyCard();
-  /* the one whole-device action, last on the account tab beside Your data / Back up / Restore
-     -- it used to sit at the bottom of Kitchen, from before You existed as its own destination,
-     and never moved (his report, 2026-09-09: "I don't see a Start Over button anywhere on the
-     You page"). act.reset() wipes the entire device, not anything kitchen-specific. */
-  aside+='<button class="btn" type="button" style="width:100%" data-fk="reset" onclick="act.reset()">Start over</button>';
+  /* Restart the rotation, last on the account tab beside Your data / Back up / Restore. It clears
+     the meal side back to an empty kitchen at meal 1 (the honest start, the same place a fresh setup
+     lands: the first shopping list) and keeps the profile and the lab history untouched (it was
+     called "Start over" and read as a full wipe; it never was one, his report 2026-09-09). Two-tap,
+     mirroring the history row's Remove, so a stray tap cannot clear a rotation; the note says plainly
+     what goes and what stays. A true erase-everything is deliberately not a one-tap button here: lab
+     results cost real money and have no undo, and the profile is editable above without a reset. */
+  aside+=RSTASK
+    ?'<div class="btnrow" style="margin-top:var(--s2)"><button class="btn" style="flex:1" type="button" data-fk="resetno" onclick="act.resetCancel()">Cancel</button>'
+      +'<button class="btn btn--ink" style="flex:1" type="button" data-fk="resetyes" onclick="act.reset()">Restart it</button></div>'
+      +'<p class="t-note" style="margin-top:var(--s2)">This clears your kitchen and starts the rotation over at meal 1. Your profile and lab results stay.</p>'
+    :'<button class="btn" type="button" style="width:100%" data-fk="reset" onclick="act.resetAsk()">Restart the rotation</button>';
   return '<div class="stack stack--top"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
 
