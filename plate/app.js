@@ -542,7 +542,7 @@ window.act={
    if(!file){MSG='Choose a file first.';render();return;}
    MSG='Uploading '+file.name+'…';render();
    try{const r=await api('/api/upload?name='+encodeURIComponent(file.name),{method:'POST',body:await file.arrayBuffer()});
-     MSG='Saved as '+r.file+'.';FILES=null;
+     MSG='Saved as '+r.file+'.';FILES_STALE=true;
      if(/\.(csv|xlsx|xlsm)$/i.test(r.file))act.tracker(r.file);else act.preview(r.file);}
    catch(e){MSG=e.message;render();}},
  /* Nothing is stored until the preview has been seen and the button pressed. The first look at
@@ -564,7 +564,7 @@ window.act={
      r.file=f;r.manual=manual;r.opts=opts;
      r.edit=r.rows.map(x=>({test_name:x.test_name,value:x.value,unit:x.unit,ref_range:x.ref_range,lab_flag:x.lab_flag,panel:x.panel,marker:x.marker,status:x.status,keep:true,open:false}));
      ING=r;
-     if(commit&&r.result){MK=null;FILES=null;TREND=null;MKFILL=true;COMMITTED=true;say('Committed. '+r.result.written+' new rows written.');dinnerAfter(r);}}
+     if(commit&&r.result){MK_STALE=true;FILES_STALE=true;TREND=null;MKFILL=true;COMMITTED=true;say('Committed. '+r.result.written+' new rows written.');dinnerAfter(r);}}
    catch(e){ING={file:f,manual:manual,opts:opts,error:e.message,diag:e.diag||null,edit:edit,info:info,markers:MKCAT};}
    render();if(MK===null)loadMarkers();},
  /* results typed from a paper report, or one the reader could not read: the same preview */
@@ -585,7 +585,7 @@ window.act={
    try{const r=await api('/api/import-tracker',{method:'POST',headers:{'Content-Type':'application/json'},
        body:JSON.stringify({file:f,commit:!!commit})});
      r.file=f;r.kind='tracker';ING=r;
-     if(commit&&r.committed){BODY=null;ASSOC=null;FILES=null;say('Imported. Weight and intake are under Body.');}}
+     if(commit&&r.committed){BODY=null;ASSOC=null;FILES_STALE=true;say('Imported. Weight and intake are under Body.');}}
    catch(e){ING={file:f,kind:'tracker',error:e.message};}
    render();},
  trackerCommit(){act.tracker(null,true);},
@@ -613,9 +613,14 @@ window.act={
      if(g('lensSel'))await post('guideline_lens',g('lensSel').value);
      if(g('tierSel'))await post('risk_tier',g('tierSel').value);
      if(g('cadIn')&&g('cadIn').value)await post('draw_cadence_months',g('cadIn').value);
-     HIST=null;MK=null;DRAW=null;TREND=null;MSG='';say('Saved.');
-   }catch(e){MSG=e.message;}
-   render();if(MK===null)loadMarkers();},
+     /* the reload every other settings-save on this page already uses (storeSave, saveRow,
+        addHist...), not a bare null+render: this card's own HIST/MK were nulled to force a
+        refetch, but viewProfile()'s and viewMarkers()'s own "not loaded yet" guards blank the
+        WHOLE screen on null, so the very next render hid "Saved." behind a spinner until a
+        background fetch quietly fixed it -- the same shape as the report-commit bug he found,
+        one call away (his report, 2026-09-09). A full reload needs no such guard at all. */
+     returnTo({at:'lens'});flash('Saved.');setTimeout(()=>location.reload(),350);}
+   catch(e){MSG=e.message;render();}},
  sound(v){soundSet(v);render();if(v)chime('log');},
  /* the tier's line follows the select before Save, so a person reads what they are choosing */
  tierWord(v){const el=document.getElementById('tierline');if(el&&TIERWORD[v])el.textContent=tierLine(v);},
@@ -1032,7 +1037,7 @@ function diff(F,run){
    swallowed and scrolling stalled for a second or two. There is no iframe now.
    ========================================================================== */
 
-let MK=null, MKAT=null, MKLOAD=false, EXPLAIN={}, OPEN=null, EXON=false, TRADED=null, YOUFROM=null;
+let MK=null, MK_STALE=false, MKAT=null, MKLOAD=false, EXPLAIN={}, OPEN=null, EXON=false, TRADED=null, YOUFROM=null;
 
 const VIEWS=[['tonight','Tonight'],['rotation','Rotation'],['kitchen','Kitchen'],['markers','Markers']];
 const NAVGL={
@@ -1433,6 +1438,13 @@ function markerRow(m,dt,pre){
 
 function viewMarkers(){
   if(MK===null){loadMarkers();return '<div class="stack"><section class="card a-hero"><p class="t-body">Loading…</p></section></div>';}
+  /* a report commit marks this stale rather than clearing it, for the same reason FILES_STALE
+     exists in viewReports(): whichever markers sub-view is on screen -- reports, most often --
+     would otherwise blank to this bare loading card for one render, hiding whatever it was
+     already showing (the "Committed" card among it), and only quietly reappear once the
+     background refetch below resolved. Serving the still-good MK for this one render and
+     refreshing underneath it keeps the screen exactly as it was in the meantime. */
+  if(MK_STALE){MK_STALE=false;loadMarkers();}
   if(MK==='none')return '<div class="stack"><section class="card a-hero" data-family="plum"><span class="t-label">Markers</span>'+
     '<p class="t-body" style="margin-top:var(--s2)">No labs saved on this phone yet.</p>'+
     '<p class="t-note" style="margin-top:var(--s2)">Open this once near the Mac and they stay here.</p></section></div>';
@@ -2245,7 +2257,7 @@ function viewKitchen(F){
    ========================================================================== */
 let COMMITTED=false;               /* a report was committed on this page: the plan it holds is the old one, so leaving the tab fetches the page again */
 let MKVIEW='overview', TREND=null, TRENDM='apob', BODY=null, ASSOC=null, DRAW=null, PLANQ={}, MKCAT=[],
-    FILES=null, ING=null, HIST=null, LAN=null, LOADING={}, MSG='';
+    FILES=null, FILES_STALE=false, ING=null, HIST=null, LAN=null, LOADING={}, MSG='';
 
 /* Every /api call, one way. The service worker answers with {offline:true} when the Mac is
    not running; that is a sentinel, not data, and it must never reach a renderer. */
@@ -2608,6 +2620,15 @@ function counter(c){
 }
 function viewReports(){
   if(!FILES){want('files','/api/files',v=>{FILES=v;});return '<div class="stack"><section class="card a-hero">'+loading()+'</section></div>';}
+  /* An upload, a commit or a tracker import marks the file list stale rather than clearing it: a
+     commit's own "Committed" card sits on this same screen, and clearing FILES to force a refetch
+     used to blank the whole page -- that card included -- back to a bare spinner for one render,
+     so the confirmation was gone before it could be seen and only reappeared, correctly, once the
+     background fetch resolved. Nothing was actually wrong; it just never stayed on screen long
+     enough to read (his report, 2026-09-09: "unclear to know that its committed... only when you
+     go to a different page and go back does it show"). Now the stale list keeps showing while a
+     fresh one loads quietly behind it, and the row updates in place once it lands. */
+  if(FILES_STALE){FILES_STALE=false;want('files','/api/files',v=>{FILES=v;});}
   if(FILES.error)return '<div class="stack"><section class="card a-hero">'+errBox(FILES.error)+'</section></div>';
   const f=FILES;
   let top='<section class="card" data-family="plum"><span class="t-label">Add a report</span>'+
