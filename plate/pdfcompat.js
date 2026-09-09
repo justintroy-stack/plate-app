@@ -99,6 +99,40 @@ export function installPromiseTry(target) {
   return true;
 }
 
+/* for await (const chunk of stream), and stream.values(): async iteration of a ReadableStream. A
+   Web Streams feature, not a language one -- core-js does not cover it, the legacy build does not
+   cover it, and Safari has never shipped it, on any version. THIS was his crash, from the first
+   report to the fourth (Safari 26.6.1, 2026-09-09): pdf.js's getTextContent() is
+   `for await (const t of e)` over the page's text-content stream, and Safari threw "undefined is
+   not a function (near '...t of e...')" at exactly that `t of e` -- the one line every earlier fix
+   was reasoning from, finally read at its own address once the diagnostic block carried a stack
+   trace off the phone. Chrome 124+, Firefox 110+ and Node have it, which is why it never failed
+   anywhere it could be run here. The stand-in is the loop the Streams spec defines for it: take a
+   reader, read until done, release the lock -- including on an early exit, via finally. Installed
+   on the page, where getTextContent runs, and harmlessly in the worker. pdftext.js no longer
+   depends on it either way: it reads the stream with a plain reader (below). */
+export function installStreamAsyncIterator(target) {
+  const g = target || REALM;
+  const RS = g.ReadableStream;
+  if (typeof RS !== 'function' || !RS.prototype) return false;
+  if (typeof RS.prototype[Symbol.asyncIterator] === 'function') return false;
+  const iterate = async function* () {
+    const reader = this.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return;
+        yield value;
+      }
+    } finally { reader.releaseLock(); }
+  };
+  Object.defineProperty(RS.prototype, Symbol.asyncIterator, { value: iterate, writable: true, configurable: true, enumerable: false });
+  if (typeof RS.prototype.values !== 'function') {
+    Object.defineProperty(RS.prototype, 'values', { value: iterate, writable: true, configurable: true, enumerable: false });
+  }
+  return true;
+}
+
 /* Every stand-in above, for one realm. Returns which ones actually had to install, so a test can
    tell "ran on an engine with everything" apart from "ran and patched something". */
 export function installAll(target) {
@@ -107,23 +141,26 @@ export function installAll(target) {
     toHex: installToHex(target),
     promiseWithResolvers: installPromiseWithResolvers(target),
     promiseTry: installPromiseTry(target),
+    streamAsyncIterator: installStreamAsyncIterator(target),
   };
 }
 
 /* What the engine has of its own, by name. Iterator is listed though nothing here installs it:
    the vendored library is the LEGACY pdf.js build, which bundles core-js and installs the
    Iterator global itself the moment it is imported -- the modern build referenced it unguarded
-   at top level and would not import at all without it (his iPhone, 2026-09-09). Read here, before
-   anything installs, it is the browser's true native state; read after, every entry says
-   "function" and tells you nothing. */
+   at top level and would not import at all without it. asyncStream is the one that was actually
+   missing on his iPhone. Read here, before anything installs, this is the browser's true native
+   state; read after, every entry says "function" and tells you nothing. */
 export function probe(target) {
   const g = target || REALM;
+  const RS = g.ReadableStream;
   return {
     Iterator: typeof g.Iterator,
     sumPrecise: typeof g.Math.sumPrecise,
     toHex: typeof g.Uint8Array.prototype.toHex,
     withResolvers: typeof g.Promise.withResolvers,
     try: typeof g.Promise.try,
+    asyncStream: (typeof RS === 'function' && RS.prototype) ? typeof RS.prototype[Symbol.asyncIterator] : 'undefined',
   };
 }
 

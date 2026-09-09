@@ -79,6 +79,28 @@ function getWorker(pdfjs) {
   return worker;
 }
 
+/* A page's text runs, read from pdf.js's own stream with a plain reader.
+
+   pdf.js's getTextContent() is `for await (const t of e)` over that stream -- async iteration of
+   a ReadableStream, a Web Streams feature Safari has never shipped -- so on an iPhone it threw
+   "undefined is not a function (near '...t of e...')" at exactly that `t of e` (his report,
+   2026-09-09, read at its own address by the diagnostic block after three fixes aimed elsewhere).
+   getReader()/read() is the Streams API every browser has had since 2017, Safari included. The
+   assembly is getTextContent()'s own -- the chunks' items in order -- so the items are the same,
+   and the twin suite holds this to pdftotext's output as before. pdfcompat.js also installs the
+   async iterator for anything else in the library that wants it; this path no longer needs it. */
+async function textItems(page) {
+  const reader = page.streamTextContent().getReader();
+  const items = [];
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) return items;
+      if (value && value.items) for (const it of value.items) items.push(it);
+    }
+  } finally { reader.releaseLock(); }
+}
+
 /* bytes → {numPages, pages: string[][] (one array of lines per page), text}. `text` is what
    pdftotext -layout would print: the lines of each page, and a form feed after every page. */
 export async function readPdf(bytes, opts = {}) {
@@ -94,7 +116,7 @@ export async function readPdf(bytes, opts = {}) {
     const pages = [];
     for (let p = 1; p <= numPages; p++) {
       const page = await doc.getPage(p);
-      pages.push(layoutLines((await page.getTextContent()).items));
+      pages.push(layoutLines(await textItems(page)));
     }
     return { numPages, pages, text: pages.map(ls => ls.join('\n') + '\n\f').join('') };
   } finally {
