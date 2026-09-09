@@ -110,4 +110,24 @@ export function installAll(target) {
   };
 }
 
-installAll();
+/* What the engine has of its own, by name. Iterator is listed though nothing here installs it:
+   the vendored library is the LEGACY pdf.js build, which bundles core-js and installs the
+   Iterator global itself the moment it is imported -- the modern build referenced it unguarded
+   at top level and would not import at all without it (his iPhone, 2026-09-09). Read here, before
+   anything installs, it is the browser's true native state; read after, every entry says
+   "function" and tells you nothing. */
+export function probe(target) {
+  const g = target || REALM;
+  return {
+    Iterator: typeof g.Iterator,
+    sumPrecise: typeof g.Math.sumPrecise,
+    toHex: typeof g.Uint8Array.prototype.toHex,
+    withResolvers: typeof g.Promise.withResolvers,
+    try: typeof g.Promise.try,
+  };
+}
+
+/* The engine's own state, recorded before anything is installed -- the one fact a diagnostic
+   needs that cannot be recovered afterwards -- then the stand-ins, then which of them it took. */
+export const NATIVE = probe();
+export const INSTALLED = installAll();

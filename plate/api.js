@@ -23,7 +23,7 @@ import { payload, payloadBuilt, getState, storeState, currentOrder, recordEvents
 import * as pc from './plate_config.js';
 import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
 import { readPdf, configure } from './pdftext.js';
-import './pdfcompat.js';   // installs every modern built-in pdf.js 6 needs that a browser might predate (Math.sumPrecise, Uint8Array#toHex, Promise.withResolvers/try) -- a no-op wherever the engine already has them
+import { NATIVE as PDF_NATIVE, INSTALLED as PDF_INSTALLED } from './pdfcompat.js';   // importing it installs every modern built-in pdf.js needs that a browser might predate, a no-op wherever the engine has them; NATIVE is what the engine had before that
 import { backupFromHome, readBackup } from './backup.js';
 
 const RAW_DIR = 'labs/raw';
@@ -81,11 +81,38 @@ let pdfjsMod = null;
 async function pdfjs() {
   if (!pdfjsMod) {
     pdfjsMod = await import('../vendor/pdfjs/pdf.min.mjs');
-    // the worker runs pdfworker.js, which installs Math.sumPrecise in the worker realm before the
-    // library's worker loads -- the page's own copy of the polyfill does not reach a worker
+    // the worker runs pdfworker.js, which installs the stand-ins in the worker realm and listens
+    // for its failures before the library's worker loads -- the page's own copies reach no worker
     configure(pdfjsMod, new URL('./pdfworker.js', import.meta.url).href);
   }
   return pdfjsMod;
+}
+
+/* What the pdf.js worker reports about itself (pdfworkerdiag.js): kept for the diagnostic block a
+   failed upload shows, since pdf.js drops a worker error's stack on its way to the page. */
+const WORKER_LOG = [];
+try {
+  if (typeof BroadcastChannel === 'function') {
+    const ch = new BroadcastChannel('plate-pdf-worker');
+    ch.onmessage = (e) => { WORKER_LOG.push(e.data); if (WORKER_LOG.length > 20) WORKER_LOG.shift(); };
+    if (typeof ch.unref === 'function') ch.unref();   // node only: an open channel would otherwise hold a test process alive
+  }
+} catch (_) { /* a diagnostic never throws */ }
+
+/* Everything a screenshot of a failed upload needs to say what broke and on what: the stage, the
+   error with its stack, the build, the browser, what the engine natively had (recorded before the
+   stand-ins installed, or every entry would read "function"), and what the worker reported. Built
+   only on failure; nothing personal in it. Three fixes went out against one relayed line of
+   minified context before this existed (2026-09-09). */
+export function diagnose(stage, e) {
+  let ua = null, build = null;
+  try { ua = typeof navigator !== 'undefined' ? navigator.userAgent : null; } catch (_) {}
+  try { build = (globalThis.PLATE_LOCAL && globalThis.PLATE_LOCAL.version) || null; } catch (_) {}
+  return {
+    stage, name: (e && e.name) || null, message: String((e && e.message) || e),
+    stack: String((e && e.stack) || '').split('\n').slice(0, 8),
+    build, ua, native: PDF_NATIVE, installed: PDF_INSTALLED, worker: WORKER_LOG.slice(-6),
+  };
 }
 
 /* The food targets when they can be built, null when they cannot (server.py's _diet_or_none). */
@@ -309,12 +336,20 @@ export function installApi(home, ctx) {
         if (!file.toLowerCase().endsWith('.pdf') || !file.startsWith(RAW_DIR + '/') || file.includes('..') || !home.exists(file)) {
           return [{ error: 'file must be a PDF inside ' + RAW_DIR }, 400];
         }
-        const lib = await pdfjs();
+        /* three stages, each named on failure, each with a diagnostic: the library's own module
+           evaluating (it failed here, unstaged, on a Safari lacking the Iterator global -- the
+           crash three narrower fixes never reached), the worker starting, the file being read */
+        let lib;
+        try {
+          lib = await pdfjs();
+        } catch (e) {
+          return [{ error: "Loading the PDF reader failed: " + (e && e.message || e), diag: diagnose('loading the PDF reader', e) }, 400];
+        }
         let text;
         try {
           ({ text } = await readPdf(home.readBytes(file), { pdfjs: lib }));
         } catch (e) {
-          return [{ error: "Reading the PDF's text failed: " + (e && e.message || e) }, 400];
+          return [{ error: "Reading the PDF's text failed: " + (e && e.message || e), diag: diagnose('reading the file', e) }, 400];
         }
         [rows, info] = candidates(home, { file, text, method: 'pdf.js ' + lib.version, registry: reg, date, scanned: looksScanned(text) });
       }

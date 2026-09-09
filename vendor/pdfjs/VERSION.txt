@@ -1,5 +1,11 @@
 pdfjs-dist 6.3.289 (Apache-2.0), unmodified.
 Source: https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.3.289.tgz
 Tarball sha1 (matches the registry's dist.shasum): 9e46d89489782a479f58d674ae5ddde8481aaa17
-Files kept: build/pdf.min.mjs, build/pdf.worker.min.mjs, LICENSE.
+Files kept: legacy/build/pdf.min.mjs, legacy/build/pdf.worker.min.mjs, LICENSE -- the LEGACY build,
+kept under the plain names build/ used, so nothing that loads them changed.
+Why legacy (2026-09-09): the modern build's own top-level code references the Iterator global
+unguarded, so it fails to import at all on any Safari before 18.4 (March 2025). The legacy build
+is the same source at the same version, transpiled and bundled with core-js, which installs
+Iterator and most of the other 2025-era built-ins pdf.js calls before that line runs. It does not
+cover Promise.withResolvers; web/plate/pdfcompat.js does. See ARCHITECTURE.md, Phase 19 follow-ups.
 Served from this machine only; the library fetches nothing when given bytes instead of a URL.

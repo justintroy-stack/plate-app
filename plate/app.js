@@ -563,7 +563,7 @@ window.act={
      r.edit=r.rows.map(x=>({test_name:x.test_name,value:x.value,unit:x.unit,ref_range:x.ref_range,lab_flag:x.lab_flag,panel:x.panel,marker:x.marker,status:x.status,keep:true,open:false}));
      ING=r;
      if(commit&&r.result){MK=null;FILES=null;TREND=null;MKFILL=true;COMMITTED=true;say('Committed. '+r.result.written+' new rows written.');dinnerAfter(r);}}
-   catch(e){ING={file:f,manual:manual,opts:opts,error:e.message,edit:edit,info:info,markers:MKCAT};}
+   catch(e){ING={file:f,manual:manual,opts:opts,error:e.message,diag:e.diag||null,edit:edit,info:info,markers:MKCAT};}
    render();if(MK===null)loadMarkers();},
  /* results typed from a paper report, or one the reader could not read: the same preview */
  typeReport(){ING={manual:true,opts:{},info:{typed:true,date:'',lab:'',scanned:false},edit:[{test_name:'',value:'',unit:'',ref_range:'',lab_flag:'',panel:'',marker:'',status:'',keep:true,open:true}],markers:MKCAT};
@@ -2238,7 +2238,7 @@ async function api(path,opts){
   const r=await fetch(path,opts);
   const j=await r.json();
   if(j&&j.offline)throw new Error('Plateside is not running on the Mac right now.');
-  if(!r.ok||j.error)throw new Error(j.error||('HTTP '+r.status));
+  if(!r.ok||j.error){const err=new Error(j.error||('HTTP '+r.status));if(j.diag)err.diag=j.diag;throw err;}   /* diag: what a failed upload knows about itself (api.js diagnose()), shown under the error */
   return j;
 }
 /* fetch once, then redraw. A second call while the first is in flight is a no-op. */
@@ -2249,6 +2249,18 @@ function want(key,path,assign){
     .finally(()=>{LOADING[key]=false;if(tab==='markers'||tab==='you')render();});   /* You fetches too: the history, the device, the markers' diet */
 }
 const errBox=e=>'<div class="callout warn">'+esc(e)+'</div>';
+/* The block under a failed upload that one screenshot carries to whoever is fixing it: the stage,
+   the error and where it was thrown, the build, the browser, what the engine had of its own before
+   anything was installed for it, what the reader's worker said (api.js diagnose()). Nothing
+   personal in it: no file name, no row, no value. It exists because three fixes went out against a
+   single relayed line of minified context, "(near '...t of e...')", before any of them could be
+   checked against where that line came from (2026-09-09). */
+const diagBlock=d=>{if(!d)return '';
+  const yn=o=>Object.keys(o||{}).map(k=>k+'='+(o[k]==='function'||o[k]===true?'yes':'no')).join(' ');
+  const wk=(d.worker||[]).map(w=>String(w.kind||'')+(w.message?': '+w.message:'')+(w.native?' · engine had: '+yn(w.native)+' · installed for it: '+yn(w.installed):'')+(w.stack?'\n    '+String(w.stack).split('\n').slice(0,3).join('\n    '):'')).join('\n');
+  return '<pre class="mono" style="white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.45;margin-top:var(--s3);padding:var(--s3);border-radius:8px;background:rgba(127,127,127,.12);color:var(--ink-3)">'+
+    esc('DIAGNOSTIC — a screenshot of this box is enough\nbuild '+(d.build||'?')+'\n'+(d.ua||'')+'\nstage: '+(d.stage||'?')+'\n'+(d.name||'Error')+': '+(d.message||'')+
+        '\nengine had: '+yn(d.native)+'\ninstalled for it: '+yn(d.installed)+'\n'+(d.stack||[]).join('\n')+(wk?'\nworker:\n'+wk:''))+'</pre>';};
 const loading=()=>'<p class="t-body">Loading…</p>';
 
 /* ---- a sparkline for any series: the same drawing at every size, one path in the family
@@ -2610,7 +2622,7 @@ function viewReports(){
 function viewIngest(){
   const r=ING;
   if(r.loading)return '<section class="card">'+loading()+'</section>';
-  if(r.error&&!r.edit)return '<section class="card">'+errBox(r.error)+'</section>';
+  if(r.error&&!r.edit)return '<section class="card">'+errBox(r.error)+diagBlock(r.diag)+'</section>';
   if(r.kind==='tracker'){
     const c=r.counts;
     let h='<section class="card"><span class="t-label">Food tracking export</span><p class="t-head" style="margin-top:var(--s2)">'+esc(r.file)+'</p>';
