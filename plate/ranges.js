@@ -2,7 +2,12 @@
    A line-for-line twin of labtrack/ranges.py. */
 import { fmtNum, matchStart, PyValueError } from './py.js';
 
-export const RANGE_TOKEN_RE = /(?<range>[<>]\s*(?:OR\s*=\s*|=\s*)?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*-\s*\d[\d,]*(?:\.\d+)?)/i;
+/* the dash class: a plain hyphen, and the en dash, em dash and their kin (U+2010 through
+   U+2015) a portal export or a Word-to-PDF path tends to substitute -- a report need not have
+   typed a plain hyphen to get a range the app can read (his report, 2026-09-09). A twin of
+   labtrack/ranges.py's DASH; the five characters between the brackets below are that same
+   range, checked codepoint by codepoint after writing this line, not typed by eye. */
+export const RANGE_TOKEN_RE = /(?<range>[<>]\s*(?:OR\s*=\s*|=\s*)?\d[\d,]*(?:\.\d+)?|\d[\d,]*(?:\.\d+)?\s*[-‐-―]\s*\d[\d,]*(?:\.\d+)?)/i;
 
 /* '1.41' -> [1.41, '']; '<30' -> [30.0, '<']; 'NEGATIVE' -> [null, ''] */
 export function parseNumber(s) {
@@ -15,7 +20,7 @@ export function parseNumber(s) {
 export function parseRange(rng) {
   if (!rng) return [null, null, true, true];
   const r = String(rng).replace(/,/g, '').trim();
-  let m = matchStart(/^(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)$/, r);
+  let m = matchStart(/^(\d+(?:\.\d+)?)\s*[-‐-―]\s*(\d+(?:\.\d+)?)$/, r);
   if (m) return [parseFloat(m[1]), parseFloat(m[2]), true, true];
   m = matchStart(/^([<>])\s*(OR\s*=|=)?\s*(\d+(?:\.\d+)?)$/i, r);
   if (m) {
@@ -35,7 +40,7 @@ export function computeFlag(valueNum, qualifier, low, high, lowInc, highInc) {
 
 export function normalizeRange(r) {
   r = String(r).trim().replace(/\s+/g, ' ');
-  return r.replace(/\s*-\s*/g, '-');
+  return r.replace(/\s*[-‐-―]\s*/g, '-');   // stored as a plain hyphen, whatever the lab printed
 }
 
 /* '65-99 mg/dL' -> ['65-99', 'mg/dL']; '<5.0 (calc)' -> ['<5.0', '(calc)'] */

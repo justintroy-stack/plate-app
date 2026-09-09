@@ -2204,7 +2204,6 @@ function viewKitchen(F){
       ' data-fk="flav:'+esc(p.id)+'" onchange="act.flavToggle(\''+esc(p.id)+'\')">'+
       '<label class="row__body" for="fl-'+esc(p.id)+'"><span class="row__title">'+esc(p.name)+'</span><span class="row__meta">'+esc(p.note)+'</span></label></div>';});
   aside+='</div>'+(miss?'<button class="btn" type="button" style="width:100%;margin-top:var(--s4)" data-fk="copyflav" onclick="act.copyFlav()">Copy the '+miss+' still missing</button>':'')+'</section>';
-  aside+='<button class="btn" type="button" style="width:100%" data-fk="reset" onclick="act.reset()">Start over</button>';
 
   return '<div class="stack"><div class="pile a-hero">'+hero+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
@@ -3094,8 +3093,8 @@ function viewStoreEditor(){
 function viewDevice(L){
   const d=L.device||{};
   return '<section class="card" data-family="frost"><span class="t-label">Your data</span>'+
-    '<p class="t-body" style="margin:var(--s2) 0 var(--s3)">Everything Plateside knows is on this device: '+(d.reports||0)+' lab report'+(d.reports===1?'':'s')+', '+(d.results||0)+' stored result'+(d.results===1?'':'s')+', '+(d.files||0)+' files in all. Nothing is sent anywhere.</p>'+
-    '<p class="t-body" style="margin-bottom:var(--s3);color:var(--ink)">'+esc(PRIVACY)+'</p><p class="t-note" style="margin-bottom:var(--s3)">'+esc(PRIVACY_TEST)+'</p>'+
+    '<p class="t-body" style="margin:var(--s2) 0 var(--s3)">Everything Plateside knows is on this device: '+(d.reports||0)+' lab report'+(d.reports===1?'':'s')+', '+(d.results||0)+' stored result'+(d.results===1?'':'s')+'. Nothing is sent anywhere.</p>'+
+    '<p class="t-body" style="margin-bottom:var(--s3);color:var(--ink)">'+esc(PRIVACY)+'</p>'+
     '<p class="t-note" style="margin-bottom:var(--s3)">A backup is one file with all of it. Keep one after every lab report: a phone can clear a web app\'s storage it has not opened for a while, and the lab results are the part that cannot be typed back in. The app asks for one after each report for that reason.</p>'+
     (!standalone()?'<p class="t-note" style="margin-bottom:var(--s3)">'+esc(INSTALL)+'</p>':'')+
     '<div class="btnrow"><button class="btn btn--ink" type="button" data-fk="bkup" onclick="act.backup()">Back up</button></div>'+
@@ -3200,6 +3199,11 @@ function viewProfile(){
     '</div></div></div>'+
     (HMSG?'<p class="t-note" id="hist-msg" style="margin-top:var(--s3)">'+esc(HMSG)+'</p>':'')+'</section>';
   aside+=storyCard();
+  /* the one whole-device action, last on the account tab beside Your data / Back up / Restore
+     -- it used to sit at the bottom of Kitchen, from before You existed as its own destination,
+     and never moved (his report, 2026-09-09: "I don't see a Start Over button anywhere on the
+     You page"). act.reset() wipes the entire device, not anything kitchen-specific. */
+  aside+='<button class="btn" type="button" style="width:100%" data-fk="reset" onclick="act.reset()">Start over</button>';
   return '<div class="stack stack--top"><div class="pile a-hero">'+top+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
 

@@ -96,7 +96,14 @@ export function isUnitCell(s) {
   return !!s && isUnit(s.split(' ')[0]);
 }
 
-export function isFlag(s) { return FLAG_WORDS.includes(norm(s)); }
+/* a portal export often parenthesizes the flag, "(H)" or "(High)" -- read the word inside;
+   kept as printed, parens and all, once it is recognized (his report, 2026-09-09: a row with
+   one dropped silently, never even shown for a check) */
+export function isFlag(s) {
+  s = String(s).trim();
+  if (s.slice(0, 1) === '(' && s.slice(-1) === ')') s = s.slice(1, -1);
+  return FLAG_WORDS.includes(norm(s));
+}
 
 /* [value, flag, unit] when the cell starts with a value, else null. '412 H' is a value and its
    flag; '95 mg/dL' a value and its unit; '< 30' a censored value. */

@@ -30,22 +30,34 @@ export function scannedInfo(file, date) {
    rows and an info that says so rather than an error. */
 export function candidates(home, { file, text, method, registry, date, scanned }) {
   if (scanned) return [[], scannedInfo(file, date || null)];
-  const lab = detectLab(text);
-  const [parser, verified] = pickParser(text);
-  const report = parser.parse(text);
+  // a failure here names its own stage rather than handing back a bare native error with
+  // nothing to go on (his report, 2026-09-09, a crash the preview could only show as
+  // "undefined is not a function")
+  let lab, parser, verified, report;
+  try {
+    lab = detectLab(text);
+    [parser, verified] = pickParser(text);
+    report = parser.parse(text);
+  } catch (e) {
+    throw new Error("Reading the report's rows failed: " + (e && e.message || e));
+  }
   const drawn = date || report.date_drawn;
   if (!drawn) throw new PyValueError('Could not find a collection date in the report; supply the drawn date (YYYY-MM-DD).');
   const now = isoLocal(home.now());
   const rows = [], ignored = [];
-  for (const r of report.results) {
-    if (registry.ignored(r.test_name)) {
-      ignored.push(r.test_name + ' = ' + r.value);
-      continue;
+  try {
+    for (const r of report.results) {
+      if (registry.ignored(r.test_name)) {
+        ignored.push(r.test_name + ' = ' + r.value);
+        continue;
+      }
+      rows.push({ date_drawn: drawn, test_name: r.test_name, marker: registry.resolve(r.test_name),
+                  value: r.value, unit: r.unit, ref_range: r.ref_range, lab_flag: r.lab_flag,
+                  panel: r.panel, lab, specimen_id: report.specimen_id,
+                  source_file: file, ingested_at: now });
     }
-    rows.push({ date_drawn: drawn, test_name: r.test_name, marker: registry.resolve(r.test_name),
-                value: r.value, unit: r.unit, ref_range: r.ref_range, lab_flag: r.lab_flag,
-                panel: r.panel, lab, specimen_id: report.specimen_id,
-                source_file: file, ingested_at: now });
+  } catch (e) {
+    throw new Error("Reading the report's rows failed: " + (e && e.message || e));
   }
   const info = { file, method, parser: parser.name, verified, lab,
                  date: drawn, specimen: report.specimen_id, unparsed: report.unparsed, ignored, scanned: false };
@@ -104,17 +116,21 @@ export function chosenAliases(cands, registry) {
    candidates classified against the store; on commit the aliases chosen by hand are written
    first, then the rows. */
 export function review(home, store, registry, cands, info, { supersede = false, replace = false, commit = false } = {}) {
-  const existing = store.load();
-  const statuses = classify(cands, existing, !!supersede);
-  let result = null;
-  if (commit) {
-    const aliases = chosenAliases(cands, registry);
-    for (const [name, marker] of aliases) addAlias(home, name, marker, 'app', 'chosen on the preview');
-    result = apply(cands, statuses, store, existing, !!replace);
-    result.aliases = aliases.length;
+  try {
+    const existing = store.load();
+    const statuses = classify(cands, existing, !!supersede);
+    let result = null;
+    if (commit) {
+      const aliases = chosenAliases(cands, registry);
+      for (const [name, marker] of aliases) addAlias(home, name, marker, 'app', 'chosen on the preview');
+      result = apply(cands, statuses, store, existing, !!replace);
+      result.aliases = aliases.length;
+    }
+    const rows = cands.map((r, i) => Object.assign({}, r, { status: statuses[i] }));
+    return { info, rows, counts: countsOf(statuses), unmapped: unmappedNames(cands, registry), result, markers: catalog(registry) };
+  } catch (e) {
+    throw new Error("Comparing it to what's on file failed: " + (e && e.message || e));
   }
-  const rows = cands.map((r, i) => Object.assign({}, r, { status: statuses[i] }));
-  return { info, rows, counts: countsOf(statuses), unmapped: unmappedNames(cands, registry), result, markers: catalog(registry) };
 }
 
 /* every marker the registry knows, for the preview's picker: [id, display name, category] */

@@ -307,7 +307,12 @@ export function installApi(home, ctx) {
           return [{ error: 'file must be a PDF inside ' + RAW_DIR }, 400];
         }
         const lib = await pdfjs();
-        const { text } = await readPdf(home.readBytes(file), { pdfjs: lib });
+        let text;
+        try {
+          ({ text } = await readPdf(home.readBytes(file), { pdfjs: lib }));
+        } catch (e) {
+          return [{ error: "Reading the PDF's text failed: " + (e && e.message || e) }, 400];
+        }
         [rows, info] = candidates(home, { file, text, method: 'pdf.js ' + lib.version, registry: reg, date, scanned: looksScanned(text) });
       }
       if (body.rows != null) {
