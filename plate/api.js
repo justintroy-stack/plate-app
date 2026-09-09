@@ -23,6 +23,7 @@ import { payload, payloadBuilt, getState, storeState, currentOrder, recordEvents
 import * as pc from './plate_config.js';
 import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
 import { readPdf, configure } from './pdftext.js';
+import './pdfmath.js';   // installs Math.sumPrecise on the page if the browser predates it (pdf.js 6 needs it; iOS < 18.4 lacks it)
 import { backupFromHome, readBackup } from './backup.js';
 
 const RAW_DIR = 'labs/raw';
@@ -80,7 +81,9 @@ let pdfjsMod = null;
 async function pdfjs() {
   if (!pdfjsMod) {
     pdfjsMod = await import('../vendor/pdfjs/pdf.min.mjs');
-    configure(pdfjsMod, new URL('../vendor/pdfjs/pdf.worker.min.mjs', import.meta.url).href);
+    // the worker runs pdfworker.js, which installs Math.sumPrecise in the worker realm before the
+    // library's worker loads -- the page's own copy of the polyfill does not reach a worker
+    configure(pdfjsMod, new URL('./pdfworker.js', import.meta.url).href);
   }
   return pdfjsMod;
 }
