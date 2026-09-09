@@ -979,8 +979,16 @@ window.act={
  closeFlip(){const g=document.getElementById('gate');g.innerHTML='';},
  resetAsk(){RSTASK=true;render();},                                     /* first tap: ask, do not act */
  resetCancel(){RSTASK=false;render();},
+ /* Restarting the rotation is not restarting the tour: seen keeps every guide step and
+    guide_close, so the guide overlay stays exactly as dismissed as it was a moment ago (his
+    report, 2026-09-09: "it STILL restarts the guide when you do the restart" -- seen used to be
+    wiped to [], which is indistinguishable from a guide that has never been shown at all, since
+    guide/S.guide only gates WHETHER the overlay is eligible to show, not whether each step has
+    already been seen). The rotation's own one-time teaching notes (first_log, first_partial,
+    first_planb, report_nudge) are dropped along with everything else not guide-related, since a
+    restarted rotation is honestly a fresh first meal, first partial, first Plan B. */
  reset(){RSTASK=false;S={inv:{...FULL},cursor:0,checked:[],order:[...BASE],off:{},flav:S.flav,init:false,pending:{},applied:[],
-   gate0:{},seen:[],guide:!!S.guide,reset_at:Date.now(),last:null,setup:true,tally:{},extras:[]};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
+   gate0:{},seen:S.seen.filter(k=>GUIDE.some(s=>s.key===k)||k==='guide_close'),guide:!!S.guide,reset_at:Date.now(),last:null,setup:true,tally:{},extras:[]};partial=false;planB=false;persist();render();}   /* deliberate, and the one thing allowed to move the cursor back on the other device */
 };
 
 /* What the log just did, said in the units the system owns: meals and cycles, never dates. */

@@ -23,7 +23,7 @@ import { payload, payloadBuilt, getState, storeState, currentOrder, recordEvents
 import * as pc from './plate_config.js';
 import { candidates, rowCandidates, review, catalog, MANUAL_LAB } from './ingest.js';
 import { readPdf, configure } from './pdftext.js';
-import './pdfmath.js';   // installs Math.sumPrecise on the page if the browser predates it (pdf.js 6 needs it; iOS < 18.4 lacks it)
+import './pdfcompat.js';   // installs every modern built-in pdf.js 6 needs that a browser might predate (Math.sumPrecise, Uint8Array#toHex, Promise.withResolvers/try) -- a no-op wherever the engine already has them
 import { backupFromHome, readBackup } from './backup.js';
 
 const RAW_DIR = 'labs/raw';
