@@ -497,7 +497,7 @@ window.act={
     on the control goes back to the tab it was opened from; a card id lands on that card. */
  you(at){if(tab==='you'&&!at){tab=YOUFROM||'tonight';render();return;}
    if(tab!=='you')YOUFROM=tab;tab='you';OPEN=null;MSG='';
-   if(at)SCROLLTO=at;render();if(!at)window.scrollTo({top:0,behavior:'smooth'});if(MK===null)loadMarkers();},
+   if(at){FOLD[at]=true;SCROLLTO=at;}render();if(!at)window.scrollTo({top:0,behavior:'smooth'});if(MK===null)loadMarkers();},
  begin(s){S.inv={...EMPTY};if(s)S.inv=stockedFor();S.init=true;S.pending={};S.applied=[];S.gate0={};tab=s?'tonight':'kitchen';adoptPlan();persist();render();
    if(!s)say('Your kitchen starts empty. This first list stocks it.');},
  /* the quiet button on the first list: a pack of everything the rotation uses is already on the
@@ -519,7 +519,9 @@ window.act={
  jumpRot(d){OPEN='r'+d;render();const el=document.querySelector('[data-fk="rot:'+d+'"]');
    if(el&&el.scrollIntoView)el.scrollIntoView({block:'center',behavior:'smooth'});},
  /* a tile on Kitchen: bring that card into view. Reads nothing, writes nothing. */
- jumpK(id){const el=document.getElementById(id);if(el&&el.scrollIntoView)el.scrollIntoView({block:'start',behavior:'smooth'});},
+ /* a tile, the run-due card or a link into a folded card opens it first: a jump never lands on a closed card */
+ jumpK(id){FOLD[id]=true;render();const el=document.getElementById(id);if(el&&el.scrollIntoView)el.scrollIntoView({block:'start',behavior:'smooth'});},
+ fold(id,on){FOLD[id]=!on;render();},
  explain(){EXON=!EXON;render();},
  mk(v){MKVIEW=v;OPEN=null;MSG='';render();window.scrollTo({top:0,behavior:'smooth'});},
  allMk(){ALLOPEN=!ALLOPEN;render();},
@@ -2052,6 +2054,21 @@ const capz=z=>String(z||'').replace(/^\w/,c=>c.toUpperCase());
 const nMeals=d=>d+' meal'+(d===1?'':'s');
 /* meals until something in this zone that the rotation uses runs out */
 function zoneMeals(F,z,used){let m=H;IORDER.forEach(k=>{if(I[k].zone===z&&used.has(k)&&F.L[k]<m)m=F.L[k];});return m;}
+/* A card that opens on a tap. Its label is the header row, its count or state the meta, the
+   chevron, and the body in the .exp grid the Markers card and the lens card already use. Open
+   state is FOLD[id], session-only like OPEN and ALLOPEN: a fold is a view choice, not the home's
+   state. `open` is the default the first time; a jump into the card (act.jumpK from a tile or the
+   run-due card, act.you from a link) opens it before scrolling, so a jump never lands on a closed
+   card. The body renders only when open, as the Markers card does. Phase 20: Kitchen ran to 89
+   rows and You to a dozen cards a person scrolled past to reach the one they came for. */
+let FOLD={};
+function fold(id,fam,title,meta,body,open){
+  const on=FOLD[id]===undefined?!!open:!!FOLD[id];
+  return '<section class="card" id="'+esc(id)+'"'+(fam?' data-family="'+esc(fam)+'"':'')+'><div class="exp'+(on?' open':'')+'">'+
+    '<button class="row" type="button" data-fk="fold:'+esc(id)+'" onclick="act.fold(\''+esc(id)+'\','+on+')" aria-expanded="'+on+'" style="padding-top:0'+(on?'':';padding-bottom:0')+'">'+
+    '<span class="row__body"><span class="row__title">'+title+'</span>'+(meta?'<span class="row__meta">'+meta+'</span>':'')+'</span><span class="chev"></span></button>'+
+    '<div class="exp-b"><div>'+(on?body:'')+'</div></div></div></section>';
+}
 function tile(fam,ico,title,sub,id){
   return '<button class="tile" type="button" data-family="'+fam+'" data-fk="jump:'+esc(id)+'" onclick="act.jumpK(\''+esc(id)+'\')">'+
     '<span class="tile__top"><span class="tile__ico">'+icon(ico)+'</span><span class="tile__go">'+icon('arrow')+'</span></span>'+
@@ -2145,75 +2162,73 @@ function viewKitchen(F){
   /* what to buy, one card per store */
   let main='';
   SORDER.forEach(sk=>{const st=STORES[sk], items=runs[sk].items, first=items.length>0&&items.every(k=>(S.inv[k]||0)===0);
-    main+='<section class="card" id="k-store-'+esc(sk)+'"><div class="split"><span class="t-label">What to buy · '+esc(st.name)+'</span>'+
-      '<span class="mono" style="color:var(--ink-3)">'+storeMark(st)+(first?' · first run':'')+'</span></div>';
+    let body='';
     if(TRIP[sk]){
       const n=TRIP[sk], rows=tripNeed(sk,n,F), opts=[3,5,7,10,14,21,28,42].filter(v=>v<=H);
       if(!opts.includes(n))opts.push(n);opts.sort((a,b)=>a-b);
-      main+='<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A trip you call yourself. What the next meals draw of everything this store carries, less what is on hand, rounded up to the pack. The app counts meals, so say how many this trip should cover.</p>'+
+      body+='<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A trip you call yourself. What the next meals draw of everything this store carries, less what is on hand, rounded up to the pack. The app counts meals, so say how many this trip should cover.</p>'+
         '<div class="formgrid"><div class="field wide"><span>Cover the next</span><select data-fk="trip-n:'+esc(sk)+'" onchange="act.tripSet(\''+esc(sk)+'\',this.value)">'+
         opts.map(v=>'<option value="'+v+'"'+(v===n?' selected':'')+'>'+nMeals(v)+'</option>').join('')+'</select></div></div>';
-      if(!rows.length)main+='<p class="t-body" style="margin-top:var(--s3)">Nothing to buy: what is on hand covers the next '+nMeals(n)+'.</p>';
-      else{main+='<div class="rows" style="margin-top:var(--s2)">';
-        rows.forEach(r=>{main+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[r.k].name)+'</span>'+
+      if(!rows.length)body+='<p class="t-body" style="margin-top:var(--s3)">Nothing to buy: what is on hand covers the next '+nMeals(n)+'.</p>';
+      else{body+='<div class="rows" style="margin-top:var(--s2)">';
+        rows.forEach(r=>{body+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[r.k].name)+'</span>'+
           '<span class="row__meta">needs '+tripQty(r.need)+' '+esc(I[r.k].unit)+' over '+nMeals(n)+' · '+tripQty(r.have)+' on hand'+(r.packs>1?' · '+r.packs+' packs':'')+'</span>'+
           (I[r.k].buy?'<span class="row__note">'+esc(I[r.k].buy)+'</span>':'')+'</span>'+
           '<span class="row__val">'+tripQty(r.units)+' '+esc(I[r.k].unit)+'</span></div>';});
-        main+='</div>';}
-      main+='<div class="btnrow" style="margin-top:var(--s4)">'+
+        body+='</div>';}
+      body+='<div class="btnrow" style="margin-top:var(--s4)">'+
         '<button class="btn" type="button" data-fk="trip-copy:'+esc(sk)+'" onclick="act.tripCopy(\''+esc(sk)+'\')">Copy the trip</button>'+
         (rows.length?'<button class="btn btn--ink" type="button" data-fk="trip-bought:'+esc(sk)+'" onclick="act.tripBought(\''+esc(sk)+'\')">Bought it</button>':'')+
         '<button class="btn" type="button" data-fk="trip-close:'+esc(sk)+'" onclick="act.tripClose(\''+esc(sk)+'\')">Back</button></div>';
     } else if(!items.length){
-      main+='<p class="t-body" style="margin-top:var(--s2)">Nothing needed.'+(run.k?' '+esc(I[run.k].name)+' is next to run short, in '+nMeals(run.d)+'.':'')+'</p>'+
+      body+='<p class="t-body" style="margin-top:var(--s2)">Nothing needed.'+(run.k?' '+esc(I[run.k].name)+' is next to run short, in '+nMeals(run.d)+'.':'')+'</p>'+
         '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn" type="button" data-fk="trip:'+esc(sk)+'" onclick="act.tripOpen(\''+esc(sk)+'\')">Plan a trip</button></div>';
     } else {
       const tgt=targetOrder(), cur=S.order, by={};
       listRows(sk,F).forEach(r=>by[r.k]=r);
-      main+='<div class="rows">';
+      body+='<div class="rows">';
       items.forEach(k=>{const a=perCycle(cur,k), b=perCycle(tgt,k), d=L[k], r=by[k];
-        main+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
+        body+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
           '<span class="row__meta">'+(r?tripQty(r.units)+' '+esc(I[k].unit)+' · ':'')+esc(I[k].buy)+'</span>'+
           (a!==b?'<span class="row__note">'+b+' '+esc(I[k].unit)+' per '+N+' meals once the change lands, was '+a+'.</span>':'')+'</span>'+
           (first?'':d<=0?'<span class="pill" data-family="ember"><i class="dot"></i>out</span>':'<span class="pill pill--ghost">'+nMeals(d)+'</span>')+'</div>';});
-      main+='</div>'+(first?'<p class="t-note" style="margin-top:var(--s3)">Your kitchen starts empty, so this list stocks it for '+nMeals(Math.max(st.threshold||0,FIRST_RUN))+'. Own most of it already? Say so and the list closes.</p>':'')+
+      body+='</div>'+(first?'<p class="t-note" style="margin-top:var(--s3)">Your kitchen starts empty, so this list stocks it for '+nMeals(Math.max(st.threshold||0,FIRST_RUN))+'. Own most of it already? Say so and the list closes.</p>':'')+
         '<div class="btnrow" style="margin-top:var(--s4)">'+
         '<button class="btn" type="button" data-fk="copy:'+esc(sk)+'" onclick="act.copy(\''+esc(sk)+'\')">Copy the list</button>'+
         '<button class="btn btn--ink" type="button" data-fk="restock:'+esc(sk)+'" onclick="act.restock(\''+esc(sk)+'\')">Bought it</button></div>'+
         (first?'<button class="btn btn--quiet" type="button" data-fk="stocked" style="width:100%;margin-top:var(--s2)" onclick="act.stocked()">My kitchen is stocked already</button>':'')+
         '<button class="btn" type="button" data-fk="trip:'+esc(sk)+'" style="width:100%;margin-top:var(--s2)" onclick="act.tripOpen(\''+esc(sk)+'\')">Plan a trip</button>';
     }
-    main+='</section>';});
+    main+=fold('k-store-'+sk,'','What to buy · '+esc(st.name),storeMark(st)+' '+(items.length?items.length+' to buy':'nothing needed')+(first?' · first run':''),body,true);});
 
   /* what is on hand, one card per zone: quantity and meals as meta, the gauge, a note only
      when there is something to say, and two steppers */
   zs.forEach(z=>{const ks=live.filter(k=>I[k].zone===z);
-    main+='<section class="card" id="k-zone-'+esc(z)+'" data-family="'+(ZFAM[z]||'frost')+'"><div class="split"><span class="t-label">'+esc(capz(z))+'</span>'+
-      '<span class="mono" style="color:var(--ink-3)">'+ks.length+' item'+(ks.length===1?'':'s')+'</span></div><div class="rows">';
+    let body='<div class="rows">';
     ks.forEach(k=>{const d=L[k], down=!used.has(k), st=storeOf(k), thr=st?(st.threshold||0):0, nostore=!st&&!down;
       const q=stepOf(k)===1&&I[k].unit!=='oz'&&I[k].unit!=='tbsp'?Math.round(S.inv[k]||0):Math.round((S.inv[k]||0)*10)/10, pct=Math.round(((S.inv[k]||0)/(I[k].pack||1))*100);
       const cls=down?'out':(d<=thr?'low':'');
       const left=d>=H?'deep, over '+H+' meals':d<=0?'out':nMeals(d)+' left';
       const note=down?'Eating down: the rotation no longer uses this, so it stays off the list'
         :nostore?'Off every list: no store in play carries this':'';
-      main+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
+      body+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
         '<span class="row__meta">'+q+' '+esc(I[k].unit)+' · '+left+(st&&!down?' · '+storeMark(st)+(d<=thr?' <em class="onlist">on the list</em>':''):'')+'</span>'+gauge(pct,cls)+
         (note?'<span class="row__note'+(nostore?' row__note--hot':'')+'">'+esc(note)+'</span>':'')+'</span>'+
         '<span class="step2">'+
         '<button class="iconbtn" type="button" data-fk="less:'+k+'" onclick="act.bump(\''+k+'\',-1)" aria-label="Less '+esc(I[k].name)+'">'+icon('minus')+'</button>'+
         '<button class="iconbtn" type="button" data-fk="more:'+k+'" onclick="act.bump(\''+k+'\',1)" aria-label="More '+esc(I[k].name)+'">'+icon('plus')+'</button>'+
         '</span></div>';});
-    main+='</div></section>';});
+    body+='</div>';main+=fold('k-zone-'+z,ZFAM[z]||'frost',esc(capz(z)),ks.length+' item'+(ks.length===1?'':'s')+' · '+(zm[z]>=H?'stocked deep':nMeals(zm[z])+' left'),body,false);});
 
   /* the flavour pantry, and the way out */
   const flav=FLAV.filter(p=>!(p.excluded&&p.excluded.length)), miss=flav.filter(p=>!S.flav.includes(p.id)).length;
-  let aside='<section class="card" id="k-flav" data-family="clay"><div class="split"><span class="t-label">Flavour pantry</span>'+
-    '<span class="mono" style="color:var(--ink-3)">one-time buy</span></div><div class="rows">';
+  let fbody='<div class="rows">';
   flav.forEach(p=>{const on=S.flav.includes(p.id);
-    aside+='<div class="row"><input class="tick tick--done" type="checkbox" id="fl-'+esc(p.id)+'"'+(on?' checked':'')+
+    fbody+='<div class="row"><input class="tick tick--done" type="checkbox" id="fl-'+esc(p.id)+'"'+(on?' checked':'')+
       ' data-fk="flav:'+esc(p.id)+'" onchange="act.flavToggle(\''+esc(p.id)+'\')">'+
       '<label class="row__body" for="fl-'+esc(p.id)+'"><span class="row__title">'+esc(p.name)+'</span><span class="row__meta">'+esc(p.note)+'</span></label></div>';});
-  aside+='</div>'+(miss?'<button class="btn" type="button" style="width:100%;margin-top:var(--s4)" data-fk="copyflav" onclick="act.copyFlav()">Copy the '+miss+' still missing</button>':'')+'</section>';
+  fbody+='</div>'+(miss?'<button class="btn" type="button" style="width:100%;margin-top:var(--s4)" data-fk="copyflav" onclick="act.copyFlav()">Copy the '+miss+' still missing</button>':'');
+  const aside=fold('k-flav','clay','Flavour pantry','one-time buy'+(miss?' · '+miss+' still missing':''),fbody,false);
 
   return '<div class="stack"><div class="pile a-hero">'+hero+'</div><div class="pile a-main">'+main+'</div><div class="pile a-aside">'+aside+'</div></div>';
 }
@@ -3029,13 +3044,13 @@ function viewStores(){
   const at=k=>{const o=I[k].offers||{},p=P.picks[k];if(p&&o[p]&&P.shop.includes(p))return p;return P.shop.find(s=>o[s])||null;};
   const left=IORDER.filter(k=>used.has(k)&&!at(k));
   const carried=sk=>live.filter(k=>(I[k].offers||{})[sk]).length;
-  let h='<section class="card" id="stores" data-family="clay"><div class="split"><span class="t-label">Stores</span><span class="mono" style="color:var(--ink-3)">'+P.shop.length+' of '+SCAT.length+' in play</span></div>'+
+  let h=
     '<p class="t-note" style="margin:var(--s2) 0 var(--s1)">A store that is off drops out of the lists and the run countdown, and its pack sizes go with it.</p>';
   h+='<div class="rows">';
   SCAT.forEach(sk=>{const st=STORES[sk],on=P.shop.includes(sk);
     h+='<div class="row"><input class="tick" type="checkbox" id="st-'+esc(sk)+'"'+(on?' checked':'')+' data-fk="store:'+esc(sk)+'" onchange="act.storeToggle(\''+esc(sk)+'\')">'+
       '<label class="row__body" for="st-'+esc(sk)+'"><span class="row__title">'+esc(st.name)+' '+storeMark(st)+'</span><span class="row__meta">'+esc(String(st.cadence||'').replace(/^\w/,c=>c.toUpperCase()))+(st.cadence?' · ':'')+
-      'carries '+carried(sk)+' of '+live.length+' items · list opens at '+(st.threshold||0)+' meals of supply</span></label>'+
+      'carries '+carried(sk)+' of the '+live.length+' the rotation uses · list opens at '+(st.threshold||0)+' meals of supply</span></label>'+
       '<button class="btn btn--sm" type="button" data-fk="sedit:'+esc(sk)+'" onclick="act.storeEdit(\''+esc(sk)+'\')">Change</button></div>';});
   h+='</div>';
   /* the shipped stores are kinds (Warehouse club, Grocery store); here they take the name of the
@@ -3064,16 +3079,23 @@ function viewStores(){
   SCAT.filter(sk=>carried(sk)===0&&SCAT.length>1).forEach(sk=>{
     h+='<div class="btnrow" style="margin-top:var(--s3)"><button class="btn" type="button" data-fk="rmstore:'+esc(sk)+'" onclick="act.removeStore(\''+esc(sk)+'\')">Remove '+esc(STORES[sk].name)+'</button></div>';});
   h+='<div class="btnrow" style="margin-top:var(--s4)"><button class="btn btn--ink" type="button" data-fk="storesave" onclick="act.saveStores()">Save stores</button></div>'+
-    (SMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(SMSG)+'</p>':'')+'</section>';
-  return h;
+    (SMSG?'<p class="t-note" style="margin-top:var(--s3)">'+esc(SMSG)+'</p>':'');
+  return fold('stores','clay','Stores',P.shop.length+' of '+SCAT.length+' in play',h,false);
 }
 
 /* ---- STORE EDITOR: what each store carries, and a new store ------------------------------ */
 function viewStoreEditor(){
   const live=liveItems();
   const k=SED.item&&I[SED.item]?SED.item:'';
-  let h='<section class="card" id="sed" data-family="clay"><div class="split"><span class="t-label">What each store carries</span><span class="mono" style="color:var(--ink-3)">'+live.length+' items</span></div>'+
-    '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">Pick an item to see where it is carried. Change a pack size or a buy note, give it another store, or take a store away. Rows are saved '+WHERE+' and the lists rebuild.</p>'+
+  /* first, what each store in play actually carries, by name: the answer to "where are the rest
+     of the items?" that a count alone ("carries 34 of 40") kept raising (his report, 2026-09-09).
+     The six a warehouse club does not carry are the produce and bread only the grocery does, and
+     now they can be read rather than inferred. */
+  const P=spick();
+  let h='';
+  P.shop.forEach(sk=>{const st=STORES[sk], has=live.filter(k=>(I[k].offers||{})[sk]);
+    h+='<p class="t-note" style="margin:var(--s2) 0 0"><b>'+esc(st.name)+'</b> carries '+has.length+' of the '+live.length+' items the rotation uses'+(has.length?': '+esc(has.map(k=>I[k].name).join(', ')):'')+'.</p>';});
+  h+='<p class="t-note" style="margin:var(--s3) 0 var(--s3)">Pick an item to see where it is carried. Change a pack size or a buy note, give it another store, or take a store away. Rows are saved '+WHERE+' and the lists rebuild.</p>'+
     '<div class="formgrid"><div class="field wide"><span>Item</span><select data-fk="seditem" onchange="act.edItem(this.value)">'+
       '<option value=""'+(k?'':' selected')+'>Choose an item</option>'+
       live.map(x=>'<option value="'+esc(x)+'"'+(x===k?' selected':'')+'>'+esc(I[x].name)+' · '+(I[x].store?esc(STORES[I[x].store].name):'no store in play')+'</option>').join('')+
@@ -3096,8 +3118,8 @@ function viewStoreEditor(){
       '<div class="field"><span>&nbsp;</span><button class="btn btn--ink" type="button" data-fk="sedsave" onclick="act.saveRow()">Save row</button></div></div>';
   }
   if(SED.msg)h+='<p class="t-note" style="margin-top:var(--s3)">'+esc(SED.msg)+'</p>';
-  h+='</section>';
-  h+='<section class="card" data-family="clay"><span class="t-label">Add a store</span>'+
+  const sed=h;
+  h=
     '<p class="t-note" style="margin:var(--s2) 0 var(--s3)">A new store joins the stores in play. Then give it items above.</p>'+
     '<div class="formgrid">'+
     '<div class="field wide"><span>Name</span><input data-fk="snname" value="'+esc(SNEW.name)+'" oninput="act.snew(\'name\',this.value)" placeholder="e.g. Aldi"></div>'+
@@ -3108,8 +3130,8 @@ function viewStoreEditor(){
     '<div class="rows"><div class="row"><input class="tick" type="checkbox" id="sncd"'+(SNEW.countdown?' checked':'')+' data-fk="sncd" onchange="act.snew(\'countdown\',this.checked)">'+
     '<label class="row__body" for="sncd"><span class="row__title">The run countdown follows this store</span><span class="row__meta">One store sets the pace: the one whose packs run out first. Costco today.</span></label></div></div>'+
     '<div class="btnrow" style="margin-top:var(--s2)"><button class="btn btn--ink" type="button" data-fk="snadd" onclick="act.addStore()">Add store</button></div>'+
-    (SNEW.msg?'<p class="t-note" style="margin-top:var(--s3)">'+esc(SNEW.msg)+'</p>':'')+'</section>';
-  return h;
+    (SNEW.msg?'<p class="t-note" style="margin-top:var(--s3)">'+esc(SNEW.msg)+'</p>':'');
+  return fold('sed','clay','What each store carries',live.length+' items',sed,false)+fold('newstore','clay','Add a store','',h,false);
 }
 
 /* ---- YOUR DATA: on the client-side build, everything Plateside knows is on this device ------ */
