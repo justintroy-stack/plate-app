@@ -609,6 +609,10 @@ window.act={
  ingKeep(i,on){if(!ING||!ING.edit||!ING.edit[i])return;ING.edit[i].keep=!!on;render();},
  /* a field edited in place: the model changes, the screen does not redraw under the caret */
  ingSet(i,k,v){if(!ING||!ING.edit||!ING.edit[i])return;ING.edit[i][k]=v;},
+ /* the report's own header (drawn, lab, the two options) edited in place: written to the model
+    on every keystroke, so adding a line, which redraws, keeps what was typed (the second review,
+    2026-09-10: the date and lab were wiped and a record could be committed undated) */
+ ingInfo(k,v){if(!ING)return;ING.info=ING.info||{};ING.opts=ING.opts||{};ING.info[k]=v;ING.opts[k]=v;},
  ingAdd(){if(!ING||!ING.edit)return;ING.edit.forEach(x=>x.open=false);
    ING.edit.push({test_name:'',value:'',unit:'',ref_range:'',lab_flag:'',panel:'',marker:'',status:'',keep:true,open:true});
    render();const el=document.querySelector('[data-fk="ing:'+(ING.edit.length-1)+':test_name"]');if(el)el.focus();},
@@ -937,7 +941,10 @@ window.act={
  usedReset(){USED={cursor:-1,meal:'',amt:{}};render();},
  cancelPartial(){partial=false;render();},
  toggleOven(){pOven=!pOven;render();},
- logPartial(){FLIPSRC='log';ENTER='log';const draw=previewDraw();
+ /* nothing ticked is nothing eaten: the cursor stays where it is and the card stays open, so a
+    tap through the partial card cannot lose a night (the second review, 2026-09-10) */
+ logPartial(){if(!pOven&&!(S.checked&&S.checked.length)){say('Nothing is ticked. Tick what you ate, or Back to leave tonight as it is.');return;}
+   FLIPSRC='log';ENTER='log';const draw=previewDraw();
    note(pOven&&planB?'first_planb':'first_log');note('first_partial');
    snapshot(pOven&&planB?'plan_b':'partial');
    report(pOven&&planB?'plan_b':'partial',pOven,[...S.checked]);
@@ -988,7 +995,7 @@ window.act={
    say(st.name+' run logged: '+rows.length+' item'+(rows.length===1?'':'s')+' added to stock.');},
  copy(sk){const st=STORES[sk],rows=listRows(sk);
    if(!rows.length){say('Nothing needed from '+st.name+'.');return;}
-   const line=(r,full)=>I[r.k].name+' — '+tripQty(r.units)+' '+I[r.k].unit+' — '+(full?I[r.k].buy:I[r.k].buy.split('.')[0]);
+   const line=(r,full)=>I[r.k].name+' — '+tripQty(r.units)+' '+I[r.k].unit+(r.packs>0?' — buy '+r.packs:'')+' — '+(full?I[r.k].buy:I[r.k].buy.split('.')[0]);
    let t='';
    if(st.countdown){const g={};rows.forEach(r=>{(g[I[r.k].zone]=g[I[r.k].zone]||[]).push(line(r,true));});
      ZONES.forEach(z=>{if(g[z])t+=z.toUpperCase()+'\n'+g[z].join('\n')+'\n\n';});}
@@ -2279,7 +2286,7 @@ function viewKitchen(F){
       body+='<div class="rows">';
       items.forEach(k=>{const a=perCycle(cur,k), b=perCycle(tgt,k), d=L[k], r=by[k];
         body+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
-          '<span class="row__meta">'+(r?tripQty(r.units)+' '+esc(I[k].unit)+' · ':'')+esc(I[k].buy)+'</span>'+
+          '<span class="row__meta">'+(r?tripQty(r.units)+' '+esc(I[k].unit)+' · '+(r.packs>0?'buy '+r.packs+' · ':''):'')+esc(I[k].buy)+'</span>'+
           (a!==b?'<span class="row__note">'+b+' '+esc(I[k].unit)+' per '+N+' meals once the change lands, was '+a+'.</span>':'')+'</span>'+
           (first?'':d<=0?'<span class="pill" data-family="ember"><i class="dot"></i>out</span>':'<span class="pill pill--ghost">'+nMeals(d)+'</span>')+'</div>';});
       body+='</div>'+(first?'<p class="t-note" style="margin-top:var(--s3)">Your kitchen starts empty, so this list stocks it for '+nMeals(Math.max(st.threshold||0,FIRST_RUN))+'. Own most of it already? Say so and the list closes.</p>':'')+
@@ -2772,11 +2779,11 @@ function viewIngest(){
     if(r.dinner)h+='<div class="callout" style="background:var(--sprout-wash);color:var(--ink)"><b>'+esc(r.dinner.line)+'</b>'+
       (r.dinner.changed?' <button class="btn btn--sm btn--ink" type="button" data-fk="seerot" onclick="act.seeRotation()">See the rotation</button>':'')+'</div>';
   }
-  h+='<div class="formgrid" style="margin-top:var(--s3)"><div class="field"><span>Drawn</span><input type="text" id="optDate" data-fk="optdate" inputmode="numeric" placeholder="YYYY-MM-DD" value="'+esc(st.date||info.date||'')+'"></div>'+
-    '<div class="field"><span>Lab</span><input type="text" id="optLab" data-fk="optlab" placeholder="'+esc(typed?'Where it was drawn':'Unknown')+'" value="'+esc(st.lab||info.lab||'')+'"></div></div>';
+  h+='<div class="formgrid" style="margin-top:var(--s3)"><div class="field"><span>Drawn</span><input type="text" id="optDate" data-fk="optdate" inputmode="numeric" placeholder="YYYY-MM-DD" oninput="act.ingInfo(\'date\',this.value)" value="'+esc(st.date||info.date||'')+'"></div>'+
+    '<div class="field"><span>Lab</span><input type="text" id="optLab" data-fk="optlab" oninput="act.ingInfo(\'lab\',this.value)" placeholder="'+esc(typed?'Where it was drawn':'Unknown')+'" value="'+esc(st.lab||info.lab||'')+'"></div></div>';
   if(checked)h+='<p class="t-body" style="margin-top:var(--s3)">'+edit.length+' row'+(edit.length===1?'':'s')+(typed||scanned?' typed':' read')+'</p>'+counter(c);
-  h+='<div class="formgrid" style="margin-top:var(--s3)"><label class="row" style="padding:6px 0"><input class="tick" type="checkbox" id="optSup" data-fk="optsup"'+(st.supersede?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Replace hand-typed rows for this draw</span></label>'+
-    '<label class="row" style="padding:6px 0;border-top:0"><input class="tick" type="checkbox" id="optRep" data-fk="optrep"'+(st.replace?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Overwrite conflicting rows</span></label></div>'+
+  h+='<div class="formgrid" style="margin-top:var(--s3)"><label class="row" style="padding:6px 0"><input class="tick" type="checkbox" id="optSup" data-fk="optsup" onchange="act.ingInfo(\'supersede\',this.checked)"'+(st.supersede?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Replace hand-typed rows for this draw</span></label>'+
+    '<label class="row" style="padding:6px 0;border-top:0"><input class="tick" type="checkbox" id="optRep" data-fk="optrep" onchange="act.ingInfo(\'replace\',this.checked)"'+(st.replace?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Overwrite conflicting rows</span></label></div>'+
     '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn" type="button" data-fk="reprev" onclick="act.preview(null)">'+(checked?'Check again':'Check the lines')+'</button>'+
     '<button class="btn btn--ink" type="button" data-fk="commit" onclick="act.preview(null,true)"'+((!checked||(c.NEW+c.SUPERSEDE+(st.replace?c.CONFLICT:0))===0||r.result)?' disabled':'')+'>Commit</button></div>'+
     '<p class="t-note" style="margin-top:var(--s3)">Commit stores what is on this screen: the rows that are ticked, as they read here. Re-importing the same report changes nothing.</p>';
@@ -2826,7 +2833,10 @@ function ingRow(x,i,names,unmapped,mk){
 async function dinnerAfter(r){
   try{const cfg=await api('/api/plate/config');const now=(cfg.plan&&cfg.plan.swaps)||[];
     const had=new Set(SWAPS.map(s=>s.key)),has=new Set(now.map(s=>s.key));
-    const added=now.filter(s=>!had.has(s.key)),gone=SWAPS.filter(s=>!has.has(s.key));
+    /* a swap that already landed is done, not withdrawn: the rebuilt plan has no need of it, and
+       saying its old plate "stays" would tell a person who said no to shellfish that shellfish is
+       back (the readiness review, 2026-09-10) */
+    const added=now.filter(s=>!had.has(s.key)),gone=SWAPS.filter(s=>!has.has(s.key)&&!(S.applied&&S.applied.includes(s.key)));
     let line;
     if(added.length)line='Dinner changes: '+added.map(s=>s.from_name+' becomes '+s.to_name+(s.gate_name?', once the '+s.gate_name+' you have is gone':'')).join('; ')+'.';
     else if(gone.length)line='Dinner: '+gone.map(s=>s.from_name+' stays, the swap to '+s.to_name+' is no longer asked for').join('; ')+'.';

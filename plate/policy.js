@@ -62,6 +62,7 @@ export function loadPolicy(home) {
       cost_tier: lower(strip(r.cost_tier)),
       min_age: intCell(r.min_age),
       max_age: intCell(r.max_age),
+      sex: lower(strip(orEmpty(r.sex))).slice(0, 1),                     // m or f = that sex only (PSA); empty = everyone
       notes: strip(r.notes),
     };
   }

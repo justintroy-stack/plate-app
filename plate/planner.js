@@ -78,7 +78,11 @@ export function buildPlan(home, store, registry, draw = null, cadence = null) {
     }
   }
   const derivedIds = new Set(Object.keys(loadDerived(home)));
-  const markers = sortedSet([...Object.keys(policy), ...byMarker.keys()].filter(m => !derivedIds.has(m)));
+  // a marker the policy orders for one sex only (PSA) is not on anyone else's plan at all: not
+  // ordered, not skipped, not listed (a female profile was told to order a PSA, 2026-09-10)
+  const sex = String(prof.sex || '').trim().toLowerCase().slice(0, 1);
+  const markers = sortedSet([...Object.keys(policy), ...byMarker.keys()].filter(m => !derivedIds.has(m)))
+    .filter(m => { const pm = get(policy, m); return !(pm && pm.sex && sex && pm.sex !== sex); });
   const assessments = markers.map(m => assess(m, byMarker.has(m) ? byMarker.get(m) : [], get(policy, m), get(targets, m),
                                               draw, cadence, near, dob));
   const active = history.filter(h => h.status === 'active' || h.status === 'confirm');
