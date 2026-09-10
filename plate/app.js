@@ -3123,7 +3123,7 @@ function frSync(){
   /* a sweep on every paint as well as the observer: a jump or a restored position can skip
      whole cards without the observer ever seeing them (DESIGN.md, the reveal note) */
   const sweep=()=>document.querySelectorAll('.fr-card').forEach(c=>{const r=c.getBoundingClientRect();
-    if(r.top<window.innerHeight*0.72&&r.bottom>0){const i=+c.id.slice(5);if(!FRSEEN.includes(i))FRSEEN.push(i);}});
+    if(r.top<window.innerHeight*0.72&&r.bottom>0){const i=+c.id.slice(4);if(!FRSEEN.includes(i))FRSEEN.push(i);}});   /* 'fr-c' is four characters: slice(5) read every card as card 0 (Phase 8's bug, found on his phone in Phase 22) */
   const paint=()=>{
     sweep();
     const done=!bodyMissing().length;
@@ -3135,7 +3135,7 @@ function frSync(){
     if(cta){cta.hidden=!done;if(line)line.textContent=done?targetLine():'';}
   };
   if(!FROBS){
-    FROBS=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const i=+e.target.id.slice(5);if(!FRSEEN.includes(i))FRSEEN.push(i);}});paint();},{threshold:0.35});
+    FROBS=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting){const i=+e.target.id.slice(4);if(!FRSEEN.includes(i))FRSEEN.push(i);}});paint();},{threshold:0.35});
     document.querySelectorAll('.fr-card').forEach(c=>FROBS.observe(c));
     document.getElementById('app').addEventListener('input',()=>paint(),{passive:true});
     document.getElementById('app').addEventListener('change',()=>paint(),{passive:true});
