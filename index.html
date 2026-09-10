@@ -79,6 +79,10 @@
   --on-lit:#12150E;      /* text on any -wash or -lit */
   --on-deep:#FFFFFF;     /* text on any -deep, and nowhere else */
 
+  /* The plate: ceramic lit from the top left, and the shade it casts. The landing page's own
+     drawing (icons.svg, mp-base and one mark per family) reads these. */
+  --plate:#FFFFFF; --plate-rim:#ECEDE7; --plate-edge:#D5D7CF; --plate-well:#E3E5DE; --shade:#12150E;
+
   /* Radius. Concentric: an inner radius is the outer minus its padding. */
   --r-xs:8px; --r-sm:12px; --r-md:18px; --r-lg:26px; --r-xl:34px; --r-pill:999px;
 
@@ -115,6 +119,7 @@
     --clay-wash:#241D12;   --clay-lit:#CBB694;   --clay:#BC9A6B;   --clay-deep:#9E7C4A;   --clay-ink:#D9C09A;
     --plum-wash:#241820;   --plum-lit:#CD9DAE;   --plum:#B27E92;   --plum-deep:#95596E;   --plum-ink:#D7A9BA;
     --on-lit:#12150E; --on-deep:#0B0D0A;
+    --plate:#ECEEE8; --plate-rim:#D3D6CD; --plate-edge:#B6BAAF; --plate-well:#CBCFC4; --shade:#E9ECE4;
     --lift-1:0 1px 2px rgba(0,0,0,.40), 0 6px 16px rgba(0,0,0,.30);
     --lift-2:0 2px 6px rgba(0,0,0,.50), 0 18px 40px rgba(0,0,0,.40);
     --lift-3:0 8px 20px rgba(0,0,0,.55), 0 34px 70px rgba(0,0,0,.50);
@@ -129,6 +134,7 @@
     --clay-wash:#241D12;   --clay-lit:#CBB694;   --clay:#BC9A6B;   --clay-deep:#9E7C4A;   --clay-ink:#D9C09A;
     --plum-wash:#241820;   --plum-lit:#CD9DAE;   --plum:#B27E92;   --plum-deep:#95596E;   --plum-ink:#D7A9BA;
     --on-lit:#12150E; --on-deep:#0B0D0A;
+    --plate:#ECEEE8; --plate-rim:#D3D6CD; --plate-edge:#B6BAAF; --plate-well:#CBCFC4; --shade:#E9ECE4;
     --lift-1:0 1px 2px rgba(0,0,0,.40), 0 6px 16px rgba(0,0,0,.30);
     --lift-2:0 2px 6px rgba(0,0,0,.50), 0 18px 40px rgba(0,0,0,.40);
     --lift-3:0 8px 20px rgba(0,0,0,.55), 0 34px 70px rgba(0,0,0,.50);
@@ -191,6 +197,24 @@ button.card{width:100%;text-align:left}
 .card--lit .t-unit, .card--solid .t-unit {color:inherit;opacity:.66}
 .card--tint .t-label{color:var(--fam-ink);opacity:.75}
 .split{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s3)}
+
+/* THE PLATE — the landing page's drawing, one base and a mark per family, the family colour set
+   on the svg element itself (data-family). Tonight's hero carries it large; a rotation row
+   carries it as its thumb. */
+.mp{display:block;width:100%;height:auto;aspect-ratio:1}
+.mp--lg{width:96px}
+.mp--sm{width:44px;flex:none}
+.hero-plate{position:absolute;right:var(--s4);top:var(--s4);width:112px;z-index:1;
+  filter:drop-shadow(0 10px 16px rgba(18,21,14,.16))}
+.hero-plate .mp{width:100%}
+.hero .hero-in{padding-right:120px}
+/* the interview's hero is a heading, not a plate: smaller type, no plate, no right inset */
+.hero--setup .mealname{font-size:clamp(30px,8.6vw,38px)}
+.hero--setup .mealsub{font-size:16px}
+.hero--setup .hero-in{padding-right:0}
+.hero .readout{margin-right:-120px}
+.row__thumb .mp{position:absolute;inset:2px;width:auto}
+@media (min-width:900px){.hero-plate{width:150px;right:var(--s5);top:var(--s5)}.hero .hero-in{padding-right:164px}.hero .readout{margin-right:-164px}}
 
 /* MOTIF — the plate seen from above in the family's own colours, until there is a photograph. */
 .motif{position:absolute;inset:0;pointer-events:none;
@@ -358,12 +382,7 @@ button.card{width:100%;text-align:left}
    its own is a sheet's radius, the plate seen from above, the meal's name and
    the appliance readout. Nothing here moves because the screen was quiet. */
 .hero{border-radius:var(--r-xl);padding:var(--s5) var(--s5) var(--s6)}
-/* the plate seen from above, in the family's own light */
-.hero::before{content:"";position:absolute;inset:0;pointer-events:none;
-  background:
-    radial-gradient(circle at 88% 14%, rgba(255,255,255,.50) 0 21%, transparent 21.5%),
-    radial-gradient(circle at 88% 14%, transparent 0 28%, rgba(255,255,255,.30) 28.5% 31%, transparent 31.5%),
-    radial-gradient(circle at 88% 14%, transparent 0 38%, rgba(255,255,255,.16) 38.5% 40%, transparent 40.5%)}
+/* the plate seen from above is drawn now (.hero-plate, icons.svg), not implied by rings */
 .hero-in{position:relative;z-index:2}
 
 /* RING — one drawing for every arc: the cycle in the masthead, the cover on Kitchen, the cycle
@@ -673,6 +692,11 @@ table.data td.wrap{white-space:normal;min-width:180px}
 .nav,.statusline,.mast{max-width:520px}
 
 /* ---------- wide: the Mac gets room, not a different app ------------------------------ */
+/* BEFORE YOU COOK — the one blocker Tonight shows, only when something the plate needs is not on
+   hand: a clay tint, the missing things and the store run, above the plate. */
+.before{display:flex;gap:var(--s3);align-items:flex-start}
+.before .row__body{flex:1;min-width:0}
+
 @media (min-width:900px){
   #app{max-width:1040px}
   .nav,.statusline,.mast{max-width:1040px}
@@ -680,6 +704,8 @@ table.data td.wrap{white-space:normal;min-width:180px}
   .stack{grid-template-columns:2fr 3fr;grid-template-rows:auto 1fr;grid-template-areas:"hero main" "aside main";
     align-items:start;padding:16px 24px 28px}
   .stack--top{grid-template-columns:1fr 1fr;grid-template-rows:auto auto;grid-template-areas:"hero hero" "main aside"}
+  /* one thing to say: one column, centred, never a narrow left column with a blank right */
+  .stack--one{grid-template-columns:1fr;grid-template-rows:auto;grid-template-areas:"hero";max-width:640px;margin:0 auto}
   .chips{padding:16px 24px 0}
 }
 
@@ -812,6 +838,7 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
 .g-line.swap{animation:gswap .38s var(--ez-out) both}
 @keyframes gswap{from{opacity:0;transform:translateY(8px)}}
 .g-skip{flex:none;min-height:34px;padding:0 14px;border-radius:var(--r-pill);background:rgba(255,255,255,.14);color:var(--enamel);font-size:13px;font-weight:640}
+.g-exit{flex:none;width:34px;min-height:34px;border-radius:var(--r-pill);background:rgba(255,255,255,.14);color:var(--enamel);font-size:19px;line-height:1;display:grid;place-items:center;padding:0 0 2px}
 @media (min-width:900px){.g-panel{left:0;right:0;width:560px;margin:0 auto}}
 @media (prefers-reduced-motion:reduce){.g-ring,#gpointer path{animation:none}.g-ring{opacity:.9}}
 
@@ -947,6 +974,62 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
        the moon for dark. The word each stands for is the control's label. -->
   <symbol id="i-sun" viewBox="0 0 16 16"><circle cx="8" cy="8" r="3"/><path d="M8 1.8V3.4M8 12.6V14.2M1.8 8H3.4M12.6 8H14.2M3.6 3.6L4.7 4.7M11.3 11.3L12.4 12.4M3.6 12.4L4.7 11.3M11.3 4.7L12.4 3.6"/></symbol>
   <symbol id="i-moon" viewBox="0 0 16 16"><path d="M13.4 9.8A5.6 5.6 0 0 1 6.2 2.6A5.6 5.6 0 1 0 13.4 9.8Z"/></symbol>
+  <!-- THE PLATE. The landing page's own drawing, carried into the app: one ceramic base and one mark
+       per protein family, coloured by whatever data-family the <svg class="mp"> carries. A meal's
+       family is its protein_class (PROTFAM), and egg and dairy carry their own colours. -->
+  <filter id="fx-soft" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="4"/></filter>
+  <symbol id="mp-base" viewBox="0 0 100 100">
+    <ellipse cx="53" cy="56" rx="43" ry="41" style="fill:var(--shade)" opacity=".16" filter="url(#fx-soft)"/>
+    <circle cx="50" cy="50" r="44" style="fill:var(--plate)"/>
+    <circle cx="50" cy="50" r="44" fill="none" style="stroke:var(--plate-edge)" stroke-width="1.6"/>
+    <circle cx="50" cy="50" r="33" fill="none" style="stroke:var(--plate-well)" stroke-width="2.2"/>
+    <path d="M21 36 A33 33 0 0 1 36 21" stroke="#fff" stroke-width="2.6" fill="none" stroke-linecap="round" opacity=".95"/>
+  </symbol>
+  <symbol id="mark-beef" viewBox="0 0 100 100">
+    <ellipse cx="53" cy="57" rx="24" ry="15" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <rect x="29" y="36" width="44" height="29" rx="10" style="fill:var(--core)" transform="rotate(-12 50 50)"/>
+    <path d="M38 52 Q50 43 64 52" stroke="#fff" stroke-width="2.2" fill="none" opacity=".45" transform="rotate(-12 50 50)"/>
+    <rect x="34" y="40" width="16" height="4" rx="2" fill="#fff" opacity=".4" transform="rotate(-12 50 50)"/>
+  </symbol>
+  <symbol id="mark-fish" viewBox="0 0 100 100">
+    <ellipse cx="52" cy="56" rx="24" ry="13" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <path d="M25 51 Q38 31 74 39 Q79 55 61 64 Q38 69 25 51Z" style="fill:var(--core)"/>
+    <path d="M44 42 Q52 51 44 61" stroke="#fff" stroke-width="2.2" fill="none" opacity=".55"/>
+    <path d="M58 41 Q64 50 58 59" stroke="#fff" stroke-width="2.2" fill="none" opacity=".45"/>
+    <path d="M32 46 Q45 37 62 40" stroke="#fff" stroke-width="3" fill="none" opacity=".4" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="mark-poultry" viewBox="0 0 100 100">
+    <ellipse cx="53" cy="58" rx="23" ry="15" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <path d="M29 58 Q28 34 55 32 Q75 32 74 49 Q73 67 50 68 Q33 68 29 58Z" style="fill:var(--core)"/>
+    <path d="M36 46 Q46 38 60 41" stroke="#fff" stroke-width="3" fill="none" opacity=".42" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="mark-pork" viewBox="0 0 100 100">
+    <ellipse cx="53" cy="57" rx="25" ry="15" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <ellipse cx="50" cy="50" rx="25" ry="17" style="fill:var(--core)" transform="rotate(-18 50 50)"/>
+    <path d="M31 47 Q40 38 54 40" stroke="#fff" stroke-width="3" fill="none" opacity=".42" stroke-linecap="round" transform="rotate(-18 50 50)"/>
+    <ellipse cx="62" cy="55" rx="7" ry="4.5" fill="#fff" opacity=".35" transform="rotate(-18 50 50)"/>
+  </symbol>
+  <symbol id="mark-beans" viewBox="0 0 100 100">
+    <ellipse cx="52" cy="58" rx="22" ry="13" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <ellipse cx="40" cy="45" rx="10" ry="6.5" style="fill:var(--core)" transform="rotate(-20 40 45)"/>
+    <ellipse cx="59" cy="47" rx="10" ry="6.5" style="fill:var(--core)" transform="rotate(15 59 47)"/>
+    <ellipse cx="49" cy="59" rx="10" ry="6.5" style="fill:var(--core)" transform="rotate(-5 49 59)"/>
+    <ellipse cx="37" cy="43" rx="4" ry="2" fill="#fff" opacity=".4" transform="rotate(-20 40 45)"/>
+    <ellipse cx="56" cy="45" rx="4" ry="2" fill="#fff" opacity=".4" transform="rotate(15 59 47)"/>
+  </symbol>
+  <symbol id="mark-egg" viewBox="0 0 100 100">
+    <ellipse cx="53" cy="58" rx="24" ry="14" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <path d="M27 52 Q30 32 52 31 Q76 31 75 52 Q74 70 51 70 Q29 70 27 52Z" fill="#FFFDF7"/>
+    <circle cx="49" cy="50" r="10" fill="#F2BE3A"/>
+    <circle cx="45.5" cy="46" r="3" fill="#fff" opacity=".55"/>
+  </symbol>
+  <symbol id="mark-dairy" viewBox="0 0 100 100">
+    <ellipse cx="53" cy="58" rx="23" ry="14" style="fill:var(--shade)" opacity=".14" filter="url(#fx-soft)"/>
+    <path d="M30 60 L30 44 L58 33 L72 40 L72 56 L44 67Z" fill="#F4E3A8"/>
+    <path d="M30 44 L58 33 L72 40 L44 51Z" fill="#FBF0C6"/>
+    <path d="M44 51 L44 67" stroke="#E4CF85" stroke-width="1.6"/>
+    <circle cx="36" cy="55" r="2.2" fill="#E4CF85" opacity=".7"/><circle cx="52" cy="61" r="1.8" fill="#E4CF85" opacity=".7"/>
+  </symbol>
  </defs>
 </svg>
 
@@ -956,7 +1039,8 @@ body{background:var(--enamel);padding-bottom:calc(var(--navh) + env(safe-area-in
   <svg id="gpointer" aria-hidden="true"><path id="gpath" d=""/><circle id="gdot" r="4"/></svg>
   <div class="g-panel" role="status" aria-live="polite"><div class="g-steps" id="gsteps" aria-hidden="true"></div>
   <div class="g-row"><button class="g-line" type="button" id="gline" data-fk="guideline" onclick="act.guideFind()"></button>
-  <button class="g-skip" type="button" data-fk="guideskip" onclick="act.guideSkip()">Skip</button></div></div></div>
+  <button class="g-skip" type="button" data-fk="guideskip" onclick="act.guideSkip()">Next</button>
+  <button class="g-exit" type="button" data-fk="guideexit" aria-label="End the tour" onclick="act.guideExit()">×</button></div></div></div>
 <header class="mast" id="mast" aria-label="Plateside"></header>
 <main id="app"></main>
 <nav class="nav" id="nav" aria-label="Plateside"></nav>
