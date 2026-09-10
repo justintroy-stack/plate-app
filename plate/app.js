@@ -527,9 +527,13 @@ window.act={
  you(at){if(tab==='you'&&!at){tab=YOUFROM||'tonight';render();return;}
    if(tab!=='you')YOUFROM=tab;tab='you';OPEN=null;MSG='';
    if(at){FOLD[at]=true;SCROLLTO=at;}render();if(!at)window.scrollTo({top:0,behavior:'smooth'});if(MK===null)loadMarkers();},
- begin(s,how){S.inv={...EMPTY};if(s)S.inv=stockedFor();S.init=true;S.pending={};S.applied=[];S.gate0={};delete S.kitchen_start;tab=s?'tonight':'kitchen';adoptPlan();persist();render();
+ begin(s,how){S.inv={...EMPTY};if(s)S.inv=stockedFor();S.init=true;S.pending={};S.applied=[];S.gate0={};delete S.kitchen_start;tab=s?'tonight':'kitchen';adoptPlan();persist();
+   /* some of it: the zone cards open, so what is on the shelf can be stepped up item by item
+      before the list is shopped; the list itself stays open above them */
+   if(!s&&how==='some')ZONES.forEach(z=>{FOLD['k-zone-'+z]=true;});
+   render();
    if(s)say('Stocked: a pack of everything the rotation uses.');
-   else if(how==='some')say('Own some of it already? Buy only what is missing, or plan a trip for the next few meals.');
+   else if(how==='some')say('Own some of it? Step up what you have in Freezer, Fridge and Pantry below, then buy the rest.');
    else say('Your kitchen starts empty. This first list stocks it.');},
  /* the quiet button on the first list: a pack of everything the rotation uses is already on the
     shelf, so the list closes and Tonight is the plate to cook */
@@ -3051,7 +3055,7 @@ function viewFirstRun(){
      it is complete; and the bar that rises with the target line and the button once it is. The
      rail sits before the stack, which is a grid of named areas that would place it last. */
   let h='<div class="fr-rail" id="frrail" aria-hidden="true">'+FR_CARDS.map((c,i)=>'<i data-i="'+i+'"></i>').join('')+'<span id="frlabel">Set up your kitchen</span></div>';
-  h+='<div class="stack stack--top">';
+  h+='<div class="stack stack--top stack--setup">';
   h+='<section class="card card--lit hero hero--setup a-hero" data-family="sprout"><div class="hero-in">'+
     '<h1 class="mealname">Set up your kitchen</h1>'+
     '<p class="mealsub">Six short questions, then a rotation and a shopping list built for the way you eat, with plates sized for you.</p>'+
@@ -3124,8 +3128,9 @@ function frSync(){
     sweep();
     const done=!bodyMissing().length;
     segs.forEach((el,i)=>el.className=(i===4?done:FRSEEN.includes(i))?'lit':'');
-    const next=[0,1,2,3].find(i=>!FRSEEN.includes(i));
-    if(label)label.textContent=next!=null?FR_CARDS[next]:!done?'About you':!FRSEEN.includes(5)?FR_CARDS[5]:'Ready to build';
+    /* the label names the card in view (the furthest one seen), never the one after it */
+    const here=FRSEEN.length?Math.max(...FRSEEN):0;
+    if(label)label.textContent=done&&FRSEEN.includes(5)?'Ready to build':FR_CARDS[here];
     const cta=document.getElementById('frcta'), line=document.getElementById('frctaline');
     if(cta){cta.hidden=!done;if(line)line.textContent=done?targetLine():'';}
   };
@@ -3643,7 +3648,7 @@ function loadState(v){
     gate0:(s.gate0&&typeof s.gate0==='object')?s.gate0:{},seen:Array.isArray(s.seen)?s.seen:[],guide:!!s.guide,tour:!!s.tour,
     tally:(s.tally&&typeof s.tally==='object')?s.tally:null,
     reset_at:s.reset_at||0,setup:!!s.setup||!!s.init,last:(s.last&&typeof s.last==='object'&&Array.isArray(s.last.order))?s.last:null,
-    extras:Array.isArray(s.extras)?s.extras:[]};return true;}catch(e){return false;}
+    extras:Array.isArray(s.extras)?s.extras:[],kitchen_start:s.kitchen_start||''};return true;}catch(e){return false;}
 }
 /* The other device logged a meal or changed stock: take its copy and redraw. */
 document.addEventListener('lt:remote',e=>{

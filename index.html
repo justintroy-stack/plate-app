@@ -656,6 +656,8 @@ table.data td.wrap{white-space:normal;min-width:180px}
   padding:14px var(--gutter) calc(env(safe-area-inset-bottom) + 14px);background:var(--ink);color:var(--enamel);
   border-radius:22px 22px 0 0;box-shadow:0 -12px 40px rgba(18,21,14,.28);animation:frrise .52s var(--ez-out) both}
 .fr-cta[hidden]{display:none}
+/* room under the last card, so the restore card can scroll clear of the floating bar */
+.stack--setup{padding-bottom:calc(var(--s6) + 150px + env(safe-area-inset-bottom))}
 @keyframes frrise{from{transform:translateY(104%)}}
 .fr-cta-line{font-size:13.5px;line-height:1.4;opacity:.86}
 .fr-cta .btn-eat{min-height:52px}
@@ -704,6 +706,10 @@ table.data td.wrap{white-space:normal;min-width:180px}
   .stack{grid-template-columns:2fr 3fr;grid-template-rows:auto 1fr;grid-template-areas:"hero main" "aside main";
     align-items:start;padding:16px 24px 28px}
   .stack--top{grid-template-columns:1fr 1fr;grid-template-rows:auto auto;grid-template-areas:"hero hero" "main aside"}
+  /* the setup screen: one column, centred, the story folded above the questions; two columns
+     left the whole left side empty under a closed fold (his desktop screenshot, 2026-09-10) */
+  .stack--setup{grid-template-columns:1fr;grid-template-rows:auto;grid-template-areas:"hero" "main" "aside";max-width:720px;margin:0 auto}
+  .fr-rail{max-width:720px;margin:0 auto}
   /* one thing to say: one column, centred, never a narrow left column with a blank right */
   .stack--one{grid-template-columns:1fr;grid-template-rows:auto;grid-template-areas:"hero";max-width:640px;margin:0 auto}
   .chips{padding:16px 24px 0}
