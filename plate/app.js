@@ -3122,15 +3122,21 @@ function frSync(){
   const segs=rail.querySelectorAll('i'), label=document.getElementById('frlabel');
   /* a sweep on every paint as well as the observer: a jump or a restored position can skip
      whole cards without the observer ever seeing them (DESIGN.md, the reveal note) */
-  const sweep=()=>document.querySelectorAll('.fr-card').forEach(c=>{const r=c.getBoundingClientRect();
-    if(r.top<window.innerHeight*0.72&&r.bottom>0){const i=+c.id.slice(4);if(!FRSEEN.includes(i))FRSEEN.push(i);}});   /* 'fr-c' is four characters: slice(5) read every card as card 0 (Phase 8's bug, found on his phone in Phase 22) */
+  /* the card under the reading line (45 percent down the screen) is the one being read: it is
+     what the label names, recomputed on every scroll in both directions, so the label never
+     runs ahead of the reader and comes back when they do. A card is "seen" (its segment lit,
+     for good) the first time it reaches that line. 'fr-c' is four characters: slice(5) read
+     every card as card 0 (Phase 8's bug, found on his phone in Phase 22). */
+  let FRHERE=0;
+  const sweep=()=>{const line=window.innerHeight*0.45;let here=0;
+    document.querySelectorAll('.fr-card').forEach(c=>{const r=c.getBoundingClientRect(), i=+c.id.slice(4);
+      if(r.top<=line){here=Math.max(here,i);if(!FRSEEN.includes(i))FRSEEN.push(i);}});
+    FRHERE=here;};
   const paint=()=>{
     sweep();
     const done=!bodyMissing().length;
     segs.forEach((el,i)=>el.className=(i===4?done:FRSEEN.includes(i))?'lit':'');
-    /* the label names the card in view (the furthest one seen), never the one after it */
-    const here=FRSEEN.length?Math.max(...FRSEEN):0;
-    if(label)label.textContent=done&&FRSEEN.includes(5)?'Ready to build':FR_CARDS[here];
+    if(label)label.textContent=done&&FRHERE===5?'Ready to build':FR_CARDS[FRHERE];
     const cta=document.getElementById('frcta'), line=document.getElementById('frctaline');
     if(cta){cta.hidden=!done;if(line)line.textContent=done?targetLine():'';}
   };
