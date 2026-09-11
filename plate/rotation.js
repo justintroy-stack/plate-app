@@ -249,6 +249,13 @@ export function buildPlan(cfg, diet, order = null) {
   });
   const day = {};
   for (const k of ['kcal', 'protein_g', 'fiber_g', 'added_sugar_g', 'sat_fat_g']) if (has(targets, k)) day[k] = targets[k];
+  // A plan can be scaled to meet its calorie target and still run short on protein: the plate
+  // (plateFor, above) is sized on kcal alone, so a catalog whose protein-to-calorie ratio sits
+  // below the target's own ratio stays short at any plate size. Flagged only when the day's own
+  // estimate falls more than 10 percent under target. A twin of rotation.build_plan's own check.
+  const dayEst = dayEstimate(cfg, work);
+  const pTarget = get(day, 'protein_g'), pEst = get(dayEst, 'protein_g');
+  const proteinGapG = (pTarget && pEst != null && pEst < pTarget * 0.9) ? pyRound(pTarget - pEst, 1) : null;
   const rot = cfg.occasions.find(o => o.id === cfg.rotation_occasion);
   // The day's targets are the person's. An occasion takes a share of them, and the counts stay
   // whole because they are per rotation, not per plate.
@@ -265,7 +272,7 @@ export function buildPlan(cfg, diet, order = null) {
   return { goal, counts: { current: counts(current, meals), target: cnt },
     order_current: current, order_target: work, swaps, unmet, unplaced,
     estimate: { current: estimate(current, cfg, meals, rot), target: estimate(work, cfg, meals, rot) },
-    targets: tk, day_targets: day, occasions,
+    targets: tk, day_targets: day, protein_gap_g: proteinGapG, occasions,
     lens: get(diet, 'lens', ''), regimen };
 }
 

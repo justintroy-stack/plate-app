@@ -1727,20 +1727,26 @@ function takeOutRows(m){
 /* What tonight's plate is of. "912 kcal on the plate" read as the whole day on his phone
    (2026-09-06), because nothing said dinner was one of three meals; so the line names the
    other occasions in play, adds today's options from their pools to the plate, and sets the
-   day beside the target the plate was sized to. One meal a day: the cold block is the rest. */
+   day beside the target the plate was sized to. One meal a day: the cold block is the rest.
+   A restrictive plan can hit that kcal target and still run short on protein, invisibly, since
+   the plate is sized on kcal alone (testers' review, 2026-09-10: vegan, no soy, no nuts read
+   84 g against a 170 g target and nothing said so); PLAN.protein_gap_g (rotation.build_plan) is
+   set only when the day's own estimate runs more than 10 percent under target, so this line
+   stays quiet for every plan that already reaches it. */
 function dayLine(m){
   const cold=coldAt(0), others=OCC.filter(o=>o.id!==ROT).map(o=>o.id);
   let kc=m.kcal, pr=m.protein_g;cold.forEach(c=>{kc+=c.kcal;pr+=c.protein_g;});
   const ex=extrasTotal(S.cursor);kc+=ex.kcal;pr+=ex.protein_g;
   const dt=(PLAN&&PLAN.day_targets)||{}, tgt=dt.kcal?', against your '+Math.round(dt.kcal).toLocaleString()+' a day':'';
+  const pgap=(PLAN&&PLAN.protein_gap_g)||0, gap=pgap>0?' Most nights on this plan run short of your protein target: about '+Math.round(pgap)+' g, whatever the plate is sized to.':'';
   const also=ex.count?' Also had so far today: '+(ex.kcal||ex.protein_g?'about '+ex.kcal.toLocaleString()+' kcal and '+ex.protein_g+' g protein, counted in above':'not priced, counted in stock and not on the day')+
     (ex.unpriced&&(ex.kcal||ex.protein_g)?' (except '+ex.unpriced+' item'+(ex.unpriced===1?'':'s')+' this home carries no figures for)':'')+'.':'';
   /* a kidney limit on file sits beside the day's protein, where a person reads it, not as a
      last sentence after everything else (his report, 2026-09-08: "where does the 60 show?") */
   const kc2=CONDS.find(c=>c.id==='kidney'&&c.protein_limit_g), klim=kc2?' (your kidney limit on file: '+fmt(kc2.protein_limit_g)+' g)':'';
   const sum='about '+kc.toLocaleString()+' kcal and '+pr+' g protein';
-  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', with what you eat beside it: ':': ')+sum+klim+tgt+'.'+also;
-  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+klim+tgt+'.'+also;
+  if(!others.length)return 'Tonight is your one meal of the day'+(cold.length?', with what you eat beside it: ':': ')+sum+klim+tgt+'.'+gap+also;
+  return 'Tonight is '+occName(ROT).toLowerCase()+', one of '+NUMWORD[OCC.length]+' today. With today\'s '+list(others.map(o=>occName(o).toLowerCase()))+': '+sum+' for the day'+klim+tgt+'.'+gap+also;
 }
 /* the same running total, for a day already logged: the Last-logged card names every extra
    added since, not just the most recent one xRow shows */
@@ -2979,6 +2985,11 @@ function storyCard(opt){
 const PRIVACY=LOCAL?'Nothing you type or upload leaves this device. There is no account and no server of ours, and in this version nothing at all goes out.'
   :'Nothing you type or upload leaves this Mac and your own phone. There is no account and no server of ours, and in this version nothing at all goes out.';
 const PRIVACY_TEST='A test holds the code to that sentence: the build fails if the app reaches any host.';
+/* the one platform this build has actually been tried on, said once, on the first screen a new
+   tester meets: private testing is iPhone Safari only so far (his testers' review, 2026-09-10),
+   and a stranger on an untested phone or browser deserves to know that before anything looks
+   wrong. Not a permanent claim -- the day a second platform is verified, this line changes. */
+const PLATFORM_NOTE='Tried so far on iPhone Safari. Other phones and browsers are untested for now, so something may look or work wrong there.';
 /* how the link becomes an app, in Safari's own words; said only while it is still a page in a browser */
 const INSTALL='To keep it: in Safari tap Share, then Add to Home Screen. From then on it opens like an app, with its own icon, and works with no signal.';
 const standalone=()=>!!(window.navigator.standalone||(window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches));
@@ -3069,7 +3080,8 @@ function viewFirstRun(){
   h+='<section class="card card--lit hero hero--setup a-hero" data-family="sprout"><div class="hero-in">'+
     '<h1 class="mealname">Set up your kitchen</h1>'+
     '<p class="mealsub">Six short questions, then a rotation and a shopping list built for the way you eat, with plates sized for you.</p>'+
-    '<p class="mealsub" style="margin-top:var(--s2)">'+esc(PRIVACY)+'</p></div></section>';
+    '<p class="mealsub" style="margin-top:var(--s2)">'+esc(PRIVACY)+'</p>'+
+    '<p class="mealsub" style="margin-top:var(--s2)">'+esc(PLATFORM_NOTE)+'</p></div></section>';
   /* the story folds: the five lines are one tap away, and the first question is on the first
      screen (the review: the first screen had no setup field). How to keep the link as an app
      comes after the first plate is logged, on Tonight, not here. */
