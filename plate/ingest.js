@@ -42,7 +42,7 @@ export function candidates(home, { file, text, method, registry, date, scanned }
     throw new Error("Reading the report's rows failed: " + (e && e.message || e));
   }
   const drawn = date || report.date_drawn;
-  if (!drawn) throw new PyValueError('Could not find a collection date in the report; supply the drawn date (YYYY-MM-DD).');
+  if (!drawn) throw new PyValueError('Could not find a collection date in the report; pick the date it was drawn.');
   const now = isoLocal(home.now());
   const rows = [], ignored = [];
   try {
@@ -69,7 +69,7 @@ export function candidates(home, { file, text, method, registry, date, scanned }
    lab_flag, panel and the marker chosen for it; `base` is the report's own info when the rows
    came from a report's preview. A blank line is skipped, a half-filled one refused by number. */
 export function rowCandidates(home, { rows, registry, date, lab, base }) {
-  if (!isValidIso(date)) throw new PyValueError('Give the draw date as YYYY-MM-DD.');
+  if (!isValidIso(date)) throw new PyValueError('Pick the date it was drawn.');
   const now = isoLocal(home.now());
   const out = [], ignored = [];
   let n = 0;

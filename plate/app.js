@@ -602,7 +602,7 @@ window.act={
      r.file=f;r.manual=manual;r.opts=opts;
      r.edit=r.rows.map(x=>({test_name:x.test_name,value:x.value,unit:x.unit,ref_range:x.ref_range,lab_flag:x.lab_flag,panel:x.panel,marker:x.marker,status:x.status,keep:true,open:false}));
      ING=r;
-     if(commit&&r.result){MK_STALE=true;FILES_STALE=true;TREND=null;MKFILL=true;COMMITTED=true;say('Committed. '+r.result.written+' new rows written.');dinnerAfter(r);}}
+     if(commit&&r.result){MK_STALE=true;FILES_STALE=true;TREND=null;MKFILL=true;COMMITTED=true;say('Committed. '+r.result.written+' new row'+(r.result.written===1?'':'s')+' written.');dinnerAfter(r);}}
    catch(e){ING={file:f,manual:manual,opts:opts,error:e.message,diag:e.diag||null,edit:edit,info:info,markers:MKCAT};}
    render();if(MK===null)loadMarkers();},
  /* results typed from a paper report, or one the reader could not read: the same preview */
@@ -616,6 +616,9 @@ window.act={
     on every keystroke, so adding a line, which redraws, keeps what was typed (the second review,
     2026-09-10: the date and lab were wiped and a record could be committed undated) */
  ingInfo(k,v){if(!ING)return;ING.info=ING.info||{};ING.opts=ING.opts||{};ING.info[k]=v;ING.opts[k]=v;},
+ /* a line taken off the screen: the tick leaves a line out and keeps it in view, Remove is for
+    the line that should not be there at all (his phone, 2026-09-11: "can't remove input rows") */
+ ingRemove(i){if(!ING||!ING.edit||!ING.edit[i])return;ING.edit.splice(i,1);render();},
  ingAdd(){if(!ING||!ING.edit)return;ING.edit.forEach(x=>x.open=false);
    ING.edit.push({test_name:'',value:'',unit:'',ref_range:'',lab_flag:'',panel:'',marker:'',status:'',keep:true,open:true});
    render();const el=document.querySelector('[data-fk="ing:'+(ING.edit.length-1)+':test_name"]');if(el)el.focus();},
@@ -2780,7 +2783,7 @@ function viewIngest(){
     '<p class="t-head" style="margin-top:var(--s2)">'+esc(typed?'Typed in':info.file||'')+'</p>';
   if(r.error)h+=errBox(r.error);
   if(scanned)h+='<div class="callout warn">This report has no text layer (it looks scanned), so nothing could be read from it. Type the values you want to keep below, then commit.</div>';
-  else if(typed)h+='<p class="t-note" style="margin-top:var(--s2)">Type what the report says, as printed. Nothing is stored until you check the lines and press Commit.</p>';
+  else if(typed)h+='<p class="t-note" style="margin-top:var(--s2)">Type what the report says, as printed, and pick the date it was drawn. Nothing is stored until you check the lines and press Commit.</p>';
   else h+='<p class="t-note" style="margin-top:var(--s2)">'+(info.verified?'Read with '+esc(info.method)+' (parser '+esc(info.parser)+').':'Read by the shape of its rows, not by a layout the app knows, so check every row before you commit. Read with '+esc(info.method)+'.')+
     (info.specimen?' Specimen '+esc(info.specimen)+'.':'')+'</p>';
   if(r.result){
@@ -2791,14 +2794,14 @@ function viewIngest(){
     if(r.dinner)h+='<div class="callout" style="background:var(--sprout-wash);color:var(--ink)"><b>'+esc(r.dinner.line)+'</b>'+
       (r.dinner.changed?' <button class="btn btn--sm btn--ink" type="button" data-fk="seerot" onclick="act.seeRotation()">See the rotation</button>':'')+'</div>';
   }
-  h+='<div class="formgrid" style="margin-top:var(--s3)"><div class="field"><span>Drawn</span><input type="text" id="optDate" data-fk="optdate" inputmode="numeric" placeholder="YYYY-MM-DD" oninput="act.ingInfo(\'date\',this.value)" value="'+esc(st.date||info.date||'')+'"></div>'+
+  h+='<div class="formgrid" style="margin-top:var(--s3)"><div class="field"><span>Drawn on</span><input type="date" id="optDate" data-fk="optdate" oninput="act.ingInfo(\'date\',this.value)" onchange="act.ingInfo(\'date\',this.value)" value="'+esc(st.date||info.date||'')+'"></div>'+
     '<div class="field"><span>Lab</span><input type="text" id="optLab" data-fk="optlab" oninput="act.ingInfo(\'lab\',this.value)" placeholder="'+esc(typed?'Where it was drawn':'Unknown')+'" value="'+esc(st.lab||info.lab||'')+'"></div></div>';
   if(checked)h+='<p class="t-body" style="margin-top:var(--s3)">'+edit.length+' row'+(edit.length===1?'':'s')+(typed||scanned?' typed':' read')+'</p>'+counter(c);
   h+='<div class="formgrid" style="margin-top:var(--s3)"><label class="row" style="padding:6px 0"><input class="tick" type="checkbox" id="optSup" data-fk="optsup" onchange="act.ingInfo(\'supersede\',this.checked)"'+(st.supersede?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Replace hand-typed rows for this draw</span></label>'+
-    '<label class="row" style="padding:6px 0;border-top:0"><input class="tick" type="checkbox" id="optRep" data-fk="optrep" onchange="act.ingInfo(\'replace\',this.checked)"'+(st.replace?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Overwrite conflicting rows</span></label></div>'+
+    '<label class="row" style="padding:6px 0;border-top:0"><input class="tick" type="checkbox" id="optRep" data-fk="optrep" onchange="act.ingInfo(\'replace\',this.checked);render()"'+(st.replace?' checked':'')+'><span class="row__body row__title" style="white-space:normal">Overwrite conflicting rows</span></label></div>'+
     '<div class="btnrow" style="margin-top:var(--s3)"><button class="btn" type="button" data-fk="reprev" onclick="act.preview(null)">'+(checked?'Check again':'Check the lines')+'</button>'+
-    '<button class="btn btn--ink" type="button" data-fk="commit" onclick="act.preview(null,true)"'+((!checked||(c.NEW+c.SUPERSEDE+(st.replace?c.CONFLICT:0))===0||r.result)?' disabled':'')+'>Commit</button></div>'+
-    '<p class="t-note" style="margin-top:var(--s3)">Commit stores what is on this screen: the rows that are ticked, as they read here. Re-importing the same report changes nothing.</p>';
+    '<button class="btn btn--ink" type="button" data-fk="commit" onclick="act.preview(null,true)"'+(checked&&!r.result&&edit.some(x=>x.keep&&storable(x,st))?'':' disabled')+'>Commit</button></div>'+
+    '<p class="t-note" style="margin-top:var(--s3)">'+commitNote(checked,c,st,edit,!!r.result)+'</p>';
   const nomatch=edit.filter(x=>x.keep&&!x.marker).length;
   if(nomatch)h+='<p class="t-note" style="margin-top:var(--s2)">'+nomatch+' printed name'+(nomatch===1?' has':'s have')+' no match yet. Open the row to say which trend it joins, or leave it: it is stored as printed and joins none.</p>';
   if(info.unparsed&&info.unparsed.length)h+='<div class="callout warn">Lines that looked like results but were not read, in case one matters: '+info.unparsed.map(esc).join(' — ')+'. Add a line below to keep one.</div>';
@@ -2811,6 +2814,21 @@ function viewIngest(){
   h+='</div><div class="btnrow" style="margin-top:var(--s4)"><button class="btn" type="button" data-fk="ingadd" onclick="act.ingAdd()">Add a line</button></div>';
   if(!edit.length)h+='<p class="t-note" style="margin-top:var(--s3)">Nothing here yet. Add a line for each result you want to keep: the name as the report prints it, the number, and the unit and range if it shows them.</p>';
   return h+'</section>';
+}
+/* a line Commit would write as it stands: new, replacing a typed row, or a conflict once
+   Overwrite is ticked. Read off the lines on the screen, not the counts of the last check, so
+   unticking or removing a line moves Commit at once. */
+function storable(x,st){const w=(x.status||'').split(' ')[0];return w==='NEW'||w==='SUPERSEDE'||(w==='CONFLICT'&&!!st.replace);}
+/* the line under the buttons says why Commit is open or shut: nothing is stored until the lines
+   have been checked, and a check that finds nothing new leaves it shut (his phone, 2026-09-11:
+   a greyed Commit with no reason read as "can't commit rows") */
+function commitNote(checked,c,st,edit,done){
+  if(done)return 'Stored. Checking or importing the same results again changes nothing.';
+  if(!checked)return 'Check the lines first. Commit opens once they read clean and at least one is new.';
+  if(edit.some(x=>x.keep&&storable(x,st)))return 'Commit stores what is on this screen: the rows that are ticked, as they read here. Re-importing the same report changes nothing.';
+  const k=edit.filter(x=>x.keep&&(x.status||'').split(' ')[0]==='CONFLICT').length;
+  if(k&&!st.replace)return 'Nothing to store as it stands: '+k+' ticked line'+(k===1?' conflicts':'s conflict')+' with what is on file. Tick Overwrite conflicting rows to store '+(k===1?'it':'them')+' instead.';
+  return 'Nothing to store: every ticked line is already on file as it reads here.';
 }
 /* one row of the preview: the meta says what was read; opened, the same things are fields */
 function ingRow(x,i,names,unmapped,mk){
@@ -2837,7 +2855,7 @@ function ingRow(x,i,names,unmapped,mk){
       f('test_name','Test, as printed','Ferritin',true)+f('value','Number','412')+f('unit','Unit','ng/mL')+f('ref_range','Range printed','30-400')+f('lab_flag','Flag printed','H or High')+
       '<div class="field wide"><span>Joins the trend for</span><select data-fk="ing:'+i+':marker" onchange="act.ingSet('+i+',\'marker\',this.value);render()">'+opts+'</select></div>'+
       f('panel','Panel','',true)+
-    '</div></div></div></div></div>';
+    '</div><div class="btnrow" style="margin-top:var(--s3)"><button class="btn btn--sm" type="button" data-fk="ingdel:'+i+'" onclick="act.ingRemove('+i+')">Remove this line</button></div></div></div></div></div>';
 }
 /* After a commit the plan is rebuilt from the store, and dinner answers in one line, in the
    words the Rotation uses: which plate becomes which, gated on the stock already owned. The
