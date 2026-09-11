@@ -395,9 +395,12 @@ function tripNeed(sk,n,F){const used=consumedSet(targetOrder()), tot=drawOver(n,
    meal, so its horizon is one meal past the threshold and every row on it is short */
 function listRows(sk,F){F=F||forecast();const st=STORES[sk], ks=need(F,st), first=ks.length>0&&ks.every(k=>(S.inv[k]||0)===0),
   n=(first?Math.max(st.threshold||0,FIRST_RUN):(st.threshold||0))+1, tot=drawOver(n,F);return ks.map(k=>buyRow(k,n,tot));}
-/* a first run, every item at zero, covers three weeks of meals whatever the store's own line, so
-   a weekly store's list does not reopen after one meal */
-const FIRST_RUN=21;
+/* a first run, every item at zero, stocks one cycle of the rotation whatever the store's own
+   line: every dinner once, so a weekly store's list reopens after about five meals, a weekly
+   rhythm, never after one. It was three weeks; both readiness reviews read a fresh home's list as
+   thirty lines and a case of eggs before anyone had cooked (2026-09-10). A store whose own line is
+   longer (the club, 21) keeps it: the max below is unchanged. */
+const FIRST_RUN=N;
 const countdownStore=()=>SORDER.map(k=>STORES[k]).find(s=>s.countdown)||STORES[SORDER[0]];
 
 /* what the log is about to change, kept so it can be put back */
@@ -2289,20 +2292,23 @@ function viewKitchen(F){
     } else {
       const tgt=targetOrder(), cur=S.order, by={};
       listRows(sk,F).forEach(r=>by[r.k]=r);
+      /* a first shop says what it is before its rows, not after the thirtieth (both readiness
+         reviews, 2026-09-10): how many meals, for how many people, and that it is a one-off */
+      if(first)body+='<p class="t-note" style="margin-bottom:var(--s3)">Your first shop: an empty kitchen stocked for '+nMeals(Math.max(st.threshold||0,FIRST_RUN))+(PORTIONS>1?', '+cookingFor(PORTIONS):'')+'. After this, the list reopens only as things run low.</p>';
       body+='<div class="rows">';
       items.forEach(k=>{const a=perCycle(cur,k), b=perCycle(tgt,k), d=L[k], r=by[k];
         body+='<div class="row"><span class="row__body"><span class="row__title">'+esc(I[k].name)+'</span>'+
           '<span class="row__meta">'+(r?tripQty(r.units)+' '+esc(I[k].unit)+' · '+(r.packs>0?'buy '+r.packs+' · ':''):'')+esc(I[k].buy)+'</span>'+
           (a!==b?'<span class="row__note">'+b+' '+esc(I[k].unit)+' per '+N+' meals once the change lands, was '+a+'.</span>':'')+'</span>'+
           (first?'':d<=0?'<span class="pill" data-family="ember"><i class="dot"></i>out</span>':'<span class="pill pill--ghost">'+nMeals(d)+'</span>')+'</div>';});
-      body+='</div>'+(first?'<p class="t-note" style="margin-top:var(--s3)">Your kitchen starts empty, so this list stocks it for '+nMeals(Math.max(st.threshold||0,FIRST_RUN))+'. Own most of it already? Say so and the list closes.</p>':'')+
+      body+='</div>'+(first?'<p class="t-note" style="margin-top:var(--s3)">Own most of it already? Say so and the list closes.</p>':'')+
         '<div class="btnrow" style="margin-top:var(--s4)">'+
         '<button class="btn" type="button" data-fk="copy:'+esc(sk)+'" onclick="act.copy(\''+esc(sk)+'\')">Copy the list</button>'+
         '<button class="btn btn--ink" type="button" data-fk="restock:'+esc(sk)+'" onclick="act.restock(\''+esc(sk)+'\')">Bought it</button></div>'+
         (first?'<button class="btn btn--quiet" type="button" data-fk="stocked" style="width:100%;margin-top:var(--s2)" onclick="act.stocked()">My kitchen is stocked already</button>':'')+
         '<button class="btn" type="button" data-fk="trip:'+esc(sk)+'" style="width:100%;margin-top:var(--s2)" onclick="act.tripOpen(\''+esc(sk)+'\')">Plan a trip</button>';
     }
-    main+=fold('k-store-'+sk,'','What to buy · '+esc(st.name),storeMark(st)+' '+(items.length?items.length+' to buy':'nothing needed')+(first?' · first run':''),body,true);});
+    main+=fold('k-store-'+sk,'','What to buy · '+esc(st.name),storeMark(st)+' '+(items.length?items.length+' to buy':'nothing needed')+(first?' · first shop, '+nMeals(Math.max(st.threshold||0,FIRST_RUN)):''),body,true);});
 
   /* what is on hand, one card per zone: quantity and meals as meta, the gauge, a note only
      when there is something to say, and two steppers */
@@ -3126,7 +3132,7 @@ const FR_CARDS=['How you eat','What you cook on','When you eat','Where you shop'
 /* what is on the shelf already, asked before the first list is ever shown (the review: a
    40-item list before asking whether the kitchen is empty). Empty is the honest default. */
 let FRKITCHEN='empty';
-const FRKNOTE={empty:'The first store list stocks it, about three weeks of dinners.',
+const FRKNOTE={empty:'The first store list stocks it: one cycle of dinners, about two weeks.',
   some:'The first list opens; buy only what is missing, or plan a trip for the next few meals.',
   stocked:'A pack of everything the rotation uses is counted as on hand, and Tonight is the plate to cook.'};
 function fieldKitchenNow(){
